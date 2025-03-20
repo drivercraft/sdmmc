@@ -1,0 +1,9 @@
+[package]
+name = "sdmmc"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+bitflags = "2.9"
+arm_pl011 = "0.1"
+kspin = "0.1"
