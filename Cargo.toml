@@ -4,6 +4,19 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+fdt-parser = "0.4"
+aarch64-cpu = "10.0"
+smccc = "0.2"
 bitflags = "2.9"
 arm_pl011 = "0.1"
 kspin = "0.1"
+log = "0.4"
+
+[dev-dependencies]
+pcie = "0.2"
+bare-test = "0.2"
+byte-unit = { version = "5.1.6", default-features = false, features = ["byte"] }
+# dtb-early-console = { git = "https://github.com/rcore-os/dtb-early-console.git", package = "dtb-early-console", rev = "c1eb61a" }
+
+[build-dependencies]
+sparreal-macros = "0.0.5"
