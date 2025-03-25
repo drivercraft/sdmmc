@@ -11,9 +11,9 @@ dtb:
 	@rm -f $(DTB)
 	@qemu-system-$(ARCH) -M virt,dumpdtb=$(DIR)/qemu.dtb \
 		-smp 1 -cpu cortex-a72 -nographic \
-    	-drive file=$(DISK),format=raw,if=none,id=sdmmc \
-    	-device sdhci-pci,id=sdhci \
-    	-device sd-card,drive=sdmmc
+		-drive file=$(DISK),format=raw,if=none,id=sdmmc \
+		-device sdhci-pci,id=sdhci \
+		-device sd-card,drive=sdmmc
 	@dtc -I dts -O dtb -o $(DTB) $(DIR)/qemu.dts
 
 disk_img: 
@@ -22,7 +22,7 @@ disk_img:
 	@if [ ! -d $(DIR) ]; then \
 		mkdir $(DIR); \
 	fi;
-	@dd if=/dev/zero of=$(DISK) bs=1M count=128
+	@dd if=/dev/zero of=$(DISK) bs=1M count=1024
 	@mkfs.ext4 $(DISK)
 
 build: 
@@ -40,7 +40,7 @@ build:
 
 test: 
 	@echo "Running tests" 
-	@cargo test --test tests --  --show-output
+	@cargo test --test test -- --show-output
 
 clean:
 	@echo "Cleaning up"

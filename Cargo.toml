@@ -14,9 +14,14 @@ log = "0.4"
 
 [dev-dependencies]
 pcie = "0.2"
-bare-test = "0.2"
+bare-test = "0.4.1"
 byte-unit = { version = "5.1.6", default-features = false, features = ["byte"] }
 # dtb-early-console = { git = "https://github.com/rcore-os/dtb-early-console.git", package = "dtb-early-console", rev = "c1eb61a" }
 
+
 [build-dependencies]
-sparreal-macros = "0.0.5"
+bare-test-macros = "0.2"
+
+[[test]]
+name = "test"
+harness = false

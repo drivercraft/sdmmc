@@ -1,5 +1,5 @@
 [qemu]
 machine = "virt"
-cpu = "cortex-a53"
+cpu = "cortex-a72"
 graphic = false
-args = "-drive file=./firmware/uboot.disk,format=raw,if=none,id=disk -device sdhci-pci,id=sdhci0 -device sd-card,drive=disk"
+args = "-drive file=./firmware/uboot.disk,format=raw,if=none,id=sdmmc -device sdhci-pci,id=sdhci0 -device sd-card,drive=sdmmc"
