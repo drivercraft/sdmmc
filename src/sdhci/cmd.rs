@@ -1,4 +1,6 @@
-use crate::{constant::*, err::SdError, SdHost};
+use crate::err::SdError;
+
+use super::{constant::*, SdHost};
 
 #[derive(Debug)]
 pub struct SdCommand {

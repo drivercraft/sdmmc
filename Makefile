@@ -1,4 +1,5 @@
 APP ?= sdmmc
+COUNT ?= 1024
 ARCH ?= aarch64
 TARGET ?= aarch64-unknown-none
 DIR ?= ./firmware
@@ -22,7 +23,7 @@ disk_img:
 	@if [ ! -d $(DIR) ]; then \
 		mkdir $(DIR); \
 	fi;
-	@dd if=/dev/zero of=$(DISK) bs=1M count=1024
+	@dd if=/dev/zero of=$(DISK) bs=1M count=$(COUNT)
 	@mkfs.ext4 $(DISK)
 
 build: 
@@ -41,6 +42,10 @@ build:
 test: 
 	@echo "Running tests" 
 	@cargo test --test test -- --show-output
+
+uboot: 
+	@echo "Running tests" 
+	@cargo test --release --test test -- --show-output --uboot
 
 clean:
 	@echo "Cleaning up"

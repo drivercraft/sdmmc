@@ -1,8 +1,9 @@
 // ===== Block Device Interface =====
 
 use core::sync::atomic::{AtomicBool, Ordering};
+use crate::err::SdError;
 
-use crate::{cmd::SdCommand, constant::*, err::SdError, CardType, SdHost};
+use super::{cmd::EMmcCommand, constant::*, CardType, EMmcHost};
 
 // Simple block device trait that could be used by a filesystem\
 #[allow(unused)]
@@ -14,10 +15,10 @@ pub trait BlockDevice {
     fn get_capacity(&self) -> Result<u64, SdError>;
 }
 
-// SD Card structure
+// EMmc Card structure
 #[derive(Debug)]
-pub struct SdCard {
-    pub base_addr: usize,
+pub struct EMmcCard {
+    pub _base_addr: usize,
     pub rca: u32, // Relative Card Address
     pub cid: [u32; 4],
     pub csd: [u32; 4],
@@ -29,11 +30,11 @@ pub struct SdCard {
     pub capacity_blocks: u64,
 }
 
-impl SdCard {
+impl EMmcCard {
     #[allow(unused)]
-    pub fn init(ase_addr: usize, card_type: CardType) -> Self {
+    pub fn init(_base_addr: usize, card_type: CardType) -> Self {
         Self {
-            base_addr: ase_addr,
+            _base_addr,
             rca: 0,
             cid: [0; 4],
             csd: [0; 4],
@@ -47,7 +48,7 @@ impl SdCard {
     }
 }
 
-impl SdHost {
+impl EMmcHost {
     // Read a block from the card
     pub fn read_block(&self, block_addr: u32, buffer: &mut [u8]) -> Result<(), SdError> {
         if buffer.len() != 512 {
@@ -72,7 +73,7 @@ impl SdHost {
         };
 
         // Send READ_SINGLE_BLOCK command
-        let cmd = SdCommand::new(MMC_READ_SINGLE_BLOCK, addr, MMC_RSP_R1)
+        let cmd = EMmcCommand::new(MMC_READ_SINGLE_BLOCK, addr, MMC_RSP_R1)
             .with_data(512, 1, true);
         self.send_command(&cmd)?;
 
@@ -87,13 +88,13 @@ impl SdHost {
         // Wait for data available
         let mut timeout = 100000;
         while timeout > 0 {
-            let int_status = self.read_reg(SDHCI_INT_STATUS);
-            if int_status & SDHCI_INT_DATA_AVAIL != 0 {
+            let int_status = self.read_reg(EMMC_NORMAL_INT_STAT);
+            if int_status & EMMC_INT_DATA_AVAIL != 0 {
                 // Data available
                 break;
             }
             
-            if int_status & SDHCI_INT_ERROR_MASK != 0 {
+            if int_status & EMMC_INT_ERROR_MASK != 0 {
                 // Error
                 self.reset_data()?;
                 return Err(SdError::DataCrc);
@@ -109,7 +110,7 @@ impl SdHost {
         // Read data from buffer
         let len = buffer.len();
         for i in (0..len).step_by(4) {
-            let val = self.read_reg(SDHCI_BUFFER);
+            let val = self.read_reg(EMMC_BUF_DATA);
             
             // Convert u32 to bytes (little endian)
             buffer[i] = (val & 0xFF) as u8;
@@ -135,13 +136,13 @@ impl SdHost {
         // Wait for space available
         let mut timeout = 100000;
         while timeout > 0 {
-            let int_status = self.read_reg(SDHCI_INT_STATUS);
-            if int_status & SDHCI_INT_SPACE_AVAIL != 0 {
+            let int_status = self.read_reg(EMMC_NORMAL_INT_STAT);
+            if int_status & EMMC_INT_SPACE_AVAIL != 0 {
                 // Space available
                 break;
             }
             
-            if int_status & SDHCI_INT_ERROR_MASK != 0 {
+            if int_status & EMMC_INT_ERROR_MASK != 0 {
                 // Error
                 self.reset_data()?;
                 return Err(SdError::DataCrc);
@@ -171,7 +172,7 @@ impl SdHost {
                 val |= (buffer[i + 3] as u32) << 24;
             }
             
-            self.write_reg(SDHCI_BUFFER, val);
+            self.write_reg(EMMC_BUF_DATA, val);
         }
 
         Ok(())
@@ -201,7 +202,7 @@ impl SdHost {
         };
 
         // Send READ_MULTIPLE_BLOCK command
-        let cmd = SdCommand::new(MMC_READ_MULTIPLE_BLOCK, addr, MMC_RSP_R1)
+        let cmd = EMmcCommand::new(MMC_READ_MULTIPLE_BLOCK, addr, MMC_RSP_R1)
             .with_data(512, blocks, true);
         self.send_command(&cmd)?;
 
@@ -212,7 +213,7 @@ impl SdHost {
         }
 
         // Send STOP_TRANSMISSION command
-        let cmd = SdCommand::new(MMC_STOP_TRANSMISSION, 0, MMC_RSP_R1B);
+        let cmd = EMmcCommand::new(MMC_STOP_TRANSMISSION, 0, MMC_RSP_R1B);
         self.send_command(&cmd)?;
 
         Ok(())
@@ -247,7 +248,7 @@ impl SdHost {
         };
 
         // Send WRITE_BLOCK command
-        let cmd = SdCommand::new(MMC_WRITE_BLOCK, addr, MMC_RSP_R1)
+        let cmd = EMmcCommand::new(MMC_WRITE_BLOCK, addr, MMC_RSP_R1)
             .with_data(512, 1, false);
         self.send_command(&cmd)?;
 
@@ -286,7 +287,7 @@ impl SdHost {
         };
 
         // Send WRITE_MULTIPLE_BLOCK command
-        let cmd = SdCommand::new(MMC_WRITE_MULTIPLE_BLOCK, addr, MMC_RSP_R1)
+        let cmd = EMmcCommand::new(MMC_WRITE_MULTIPLE_BLOCK, addr, MMC_RSP_R1)
             .with_data(512, blocks, false);
         self.send_command(&cmd)?;
 
@@ -297,7 +298,7 @@ impl SdHost {
         }
 
         // Send STOP_TRANSMISSION command
-        let cmd = SdCommand::new(MMC_STOP_TRANSMISSION, 0, MMC_RSP_R1B);
+        let cmd = EMmcCommand::new(MMC_STOP_TRANSMISSION, 0, MMC_RSP_R1B);
         self.send_command(&cmd)?;
 
         Ok(())
