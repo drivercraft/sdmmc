@@ -2,7 +2,9 @@ extern crate alloc;
 
 mod cmd;
 mod block;
+mod config;
 mod constant;
+mod rockship;
 
 use core::{fmt::Display, sync::atomic::Ordering};
 use block::EMmcCard;
@@ -47,7 +49,6 @@ impl EMmcHost {
 
         // Read capabilities
         host.caps = host.read_reg(EMMC_CAPABILITIES1);
-        // host.max_current = host.read_reg(EMMC_MAX_CURRENT);
 
         // Calculate base clock from capabilities
         host.clock_base = (host.caps >> 8) & 0xFF;
@@ -92,54 +93,99 @@ impl EMmcHost {
     pub fn init(&mut self) -> Result<(), SdError> {
         info!("Init EMMC Controller");
 
+        let is_card_inserted = self.is_card_present();
+        debug!("Card inserted: {}", is_card_inserted);
+
         let version = self.read_reg16(EMMC_HOST_CNTRL_VER);
+        // version = 4.2
         info!("EMMC Version: 0x{:x}", version);
 
         let caps1 = self.read_reg(EMMC_CAPABILITIES1);
         info!("EMMC Capabilities 1: 0b{:b}", caps1);
-        let caps2 = self.read_reg(EMMC_CAPABILITIES2);
-        info!("EMMC Capabilities 2: 0x{:x}", caps2);
+
+        let mut clk_mul: u32 = 0;
+
+        if (version & EMMC_SPEC_VER_MASK) >= EMMC_SPEC_300 {
+            let caps2 = self.read_reg(EMMC_CAPABILITIES2);
+            info!("EMMC Capabilities 2: 0b{:b}", caps2);
+            clk_mul = (caps2 & EMMC_CLOCK_MUL_MASK) >> EMMC_CLOCK_MUL_SHIFT;
+        }
+
+        if self.clock_base == 0 {
+            if (version & EMMC_SPEC_VER_MASK) >= EMMC_SPEC_300 {
+                self.clock_base = (caps1 & EMMC_CLOCK_V3_BASE_MASK) >> EMMC_CLOCK_BASE_SHIFT
+            } else {
+                self.clock_base = (caps1 & EMMC_CLOCK_BASE_MASK) >> EMMC_CLOCK_BASE_SHIFT
+            }
+
+            self.clock_base *= 1000000; // convert to Hz
+            if clk_mul != 0 {
+                self.clock_base *= clk_mul;
+            }
+        }
+
+        if self.clock_base == 0 {
+            info!("Hardware doesn't specify base clock frequency");
+            return Err(SdError::UnsupportedCard);
+        }
+
+        let mut voltages = 0;
+
+        if (caps1 & EMMC_CAN_VDD_330) != 0 {
+            voltages |= MMC_VDD_32_33 | MMC_VDD_33_34;
+        } else if (caps1 & EMMC_CAN_VDD_300) != 0 {
+            voltages |= MMC_VDD_29_30 | MMC_VDD_30_31;
+        } else if (caps1 & EMMC_CAN_VDD_180) != 0 {
+            voltages |= MMC_VDD_165_195;
+        } else {
+            info!("Unsupported voltage range");
+            return Err(SdError::UnsupportedCard);
+        } 
+
+        info!("voltage range: {:#x}", voltages);
 
         // Reset the controller
         self.reset_all()?;
 
-        // Add extra delay after reset
-        for _ in 0..50000 {
-            let _ = self.read_reg8(EMMC_POWER_CTRL);
-        }
-
-        // Enable interrupts
-        self.write_reg(EMMC_NORMAL_INT_STAT_EN, EMMC_INT_ALL_MASK);
-        self.write_reg(EMMC_SIGNAL_ENABLE, EMMC_INT_ALL_MASK);
-
         // Perform full power cycle
-        self.set_power(0)?; // Power off
-        self.set_power(1)?; // Power on
+        // self.set_power(voltages)?; // Power on
+        self.set_xpower(1)?;
 
         // Set initial clock and wait for it to stabilize
-        self.set_clock(400000)?; // Start with 400 KHz for initialization
+        self.rockchip_sdhci_set_clock(400000)?; // Start with 400 KHz for initialization
         
-        // Additional delay after setting clock
-        for _ in 0..50000 {
-            let _ = self.read_reg8(EMMC_POWER_CTRL);
-        }
-
-        // Clear any pending interrupts
-        self.write_reg(EMMC_NORMAL_INT_STAT, EMMC_INT_ALL_MASK);
-
         // Set initial bus width to 1-bit
         let ctrl = self.read_reg8(EMMC_HOST_CTRL1);
         self.write_reg8(EMMC_HOST_CTRL1, ctrl & !EMMC_CTRL_4BITBUS & !EMMC_CTRL_8BITBUS);
+        // self.rockchip_sdhci_set_ios_post();
 
         // Check if card is present
         if !self.is_card_present() {
             return Err(SdError::NoCard);
         }
 
+        // // Enable interrupts
+        self.write_reg(EMMC_NORMAL_INT_STAT_EN, EMMC_INT_CMD_MASK | EMMC_INT_CMD_MASK);
+        // self.write_reg(EMMC_SIGNAL_ENABLE, 0x0);
+
         // Initialize the card
         self.init_card()?;
         
         info!("EMMC initialization completed successfully");
+        Ok(())
+    }
+
+    fn set_xpower(&self, on: u8) -> Result<(), SdError> {
+        
+        // Set voltage level to 3.0 ~ 3.1V (0x0C)
+        let pwr = if on != 0 { 0x01 | 0x0E } else { 0 };
+        self.write_reg8(EMMC_POWER_CTRL, pwr);
+
+        // Small delay for power to stabilize
+        for _ in 0..20000 {
+            let _ = self.read_reg8(EMMC_POWER_CTRL);
+        }
+
         Ok(())
     }
 
@@ -149,17 +195,12 @@ impl EMmcHost {
         self.write_reg8(EMMC_SOFTWARE_RESET, EMMC_RESET_ALL);
 
         // Wait for reset to complete with timeout
-        let mut timeout = 200000; // Increased timeout
+        let mut timeout = 20000; // Increased timeout
         while (self.read_reg8(EMMC_SOFTWARE_RESET) & EMMC_RESET_ALL) != 0 {
             if timeout == 0 {
                 return Err(SdError::Timeout);
             }
             timeout -= 1;
-        }
-
-        // Additional delay after reset completes
-        for _ in 0..10000 {
-            let _ = self.read_reg8(EMMC_SOFTWARE_RESET);
         }
 
         Ok(())
@@ -182,7 +223,7 @@ impl EMmcHost {
     }
 
     // Set controller clock frequency
-    fn set_clock(&self, freq: u32) -> Result<(), SdError> {
+    fn set_clock(&mut self, freq: u32) -> Result<(), SdError> {
         // Disable clock first
         self.write_reg16(EMMC_CLOCK_CONTROL, 0);
 
@@ -217,23 +258,37 @@ impl EMmcHost {
         }
 
         // Enable card clock
-        clk |= EMMC_CLOCK_CARD_EN;
-        self.write_reg16(EMMC_CLOCK_CONTROL, clk);
+        self.enable_card_clock()?;
 
         Ok(())
     }
 
     // Set power to the card
-    fn set_power(&self, on: u8) -> Result<(), SdError> {
-        // Set voltage level to 3.3V (0x0E)
-        let pwr = if on != 0 { 0x0E | 0x01 } else { 0 };
+    fn set_power(&self, power: usize) -> Result<(), SdError> {
+        let mut pwr = 0;
+    
+        if power != usize::MAX {  // Equivalent to (unsigned short)-1 in C
+            match 1 << power {
+                MMC_VDD_165_195 => pwr = EMMC_POWER_180,
+                MMC_VDD_29_30 | MMC_VDD_30_31 => pwr = EMMC_POWER_300,
+                MMC_VDD_32_33 | MMC_VDD_33_34 => pwr = EMMC_POWER_330,
+                _ => {}
+            }
+        }
+    
+        if pwr == 0 {
+            self.write_reg8(EMMC_POWER_CTRL, 0);
+            return Ok(());
+        }
+    
+        pwr |= EMMC_POWER_ON;
         self.write_reg8(EMMC_POWER_CTRL, pwr);
-
+    
         // Small delay for power to stabilize
         for _ in 0..20000 {
             let _ = self.read_reg8(EMMC_POWER_CTRL);
         }
-
+    
         Ok(())
     }
 
@@ -252,26 +307,23 @@ impl EMmcHost {
     // Initialize the eMMC card
     fn init_card(&mut self) -> Result<(), SdError> {
         info!("eMMC initialization started");
-
+        
         // Send CMD0 to reset the card
         let cmd = EMmcCommand::new(MMC_GO_IDLE_STATE, 0, MMC_RSP_NONE);
         self.send_command(&cmd)?;
 
         info!("eMMC reset complete");
 
-        // Add sufficient delay after reset
-        for _ in 0..100000 {
-            let _ = self.read_reg8(EMMC_POWER_CTRL);
-        }
-
         // For eMMC, we use CMD1 instead of ACMD41
         // HCS=1, voltage window for eMMC as per specs
-        let mut ocr = 0x40FF8080; // Adjusted for eMMC fixed pattern
+        let mut ocr = 0x40FF8080;
         let mut retry = 100;
         let mut ready = false;
 
         // Create card structure
         let mut card = EMmcCard::init(self.base_addr, CardType::Mmc);
+
+        debug!("Power Status {:b}", self.read_reg8(EMMC_POWER_CTRL));
 
         while retry > 0 && !ready {
             // Send CMD1 for eMMC
@@ -282,6 +334,7 @@ impl EMmcHost {
 
             // Check if card is ready (bit 31 set)
             if (ocr & (1 << 31)) != 0 {
+                info!("eMMC card ready ocr: {:#x}", ocr);
                 ready = true;
                 card.ocr = ocr;
                 if (ocr & (1 << 30)) != 0 {
@@ -303,6 +356,10 @@ impl EMmcHost {
             return Err(SdError::UnsupportedCard);
         }
 
+        for _ in 0..100000 {
+            let _ = self.read_reg8(EMMC_POWER_CTRL);
+        }
+
         // Send CMD2 to get CID
         let cmd = EMmcCommand::new(MMC_ALL_SEND_CID, 0, MMC_RSP_R2);
         self.send_command(&cmd)?;
@@ -314,7 +371,7 @@ impl EMmcHost {
             response.as_r2()[2], response.as_r2()[3]);
 
         // For eMMC, host assigns the RCA value (unlike SD where card provides it)
-        let mmc_rca = 0x0001 << 16; // Typical RCA value for eMMC is 1
+        let mmc_rca = 0x0002 << 16; // Typical RCA value for eMMC is 1
         card.rca = mmc_rca;
 
         // Send CMD3 to set RCA for eMMC
@@ -335,101 +392,100 @@ impl EMmcHost {
         let csd_version = (card.csd[3] >> 22) & 0x3;
         debug!("eMMC CSD version: {}", csd_version);
 
-        if csd_version <= 2 {
-            // Standard capacity calculation for older eMMC
-            let c_size = ((card.csd[2] & 0x3) << 10) | ((card.csd[1] >> 22) & 0x3FF);
-            let c_size_mult = (card.csd[1] >> 7) & 0x7;
-            let read_bl_len = (card.csd[2] >> 8) & 0xF;
+        // if csd_version <= 2 {            // Standard capacity calculation for older eMMC
+        //     let c_size = ((card.csd[2] & 0x3) << 10) | ((card.csd[1] >> 22) & 0x3FF);
+        //     let c_size_mult = (card.csd[1] >> 7) & 0x7;
+        //     let read_bl_len = (card.csd[2] >> 8) & 0xF;
             
-            debug!("c_size: {}, c_size_mult: {}, read_bl_len: {}", c_size, c_size_mult, read_bl_len);
+        //     debug!("c_size: {}, c_size_mult: {}, read_bl_len: {}", c_size, c_size_mult, read_bl_len);
             
-            let block_size = 1 << read_bl_len;
-            let mult = 1 << (c_size_mult + 2);
-            let capacity = (c_size + 1) as u64 * mult as u64 * block_size as u64;
-            card.capacity_blocks = capacity / 512;
+        //     let block_size = 1 << read_bl_len;
+        //     let mult = 1 << (c_size_mult + 2);
+        //     let capacity = (c_size + 1) as u64 * mult as u64 * block_size as u64;
+        //     card.capacity_blocks = capacity / 512;
             
-            debug!("eMMC capacity: {} blocks ({} bytes)", 
-                card.capacity_blocks, card.capacity_blocks * 512);
-        } else {
-            // For newer eMMC rev4.4+, may need to read Extended CSD
-            let c_size = ((card.csd[2] & 0x3) << 10) | ((card.csd[1] >> 22) & 0x3FF);
-            let c_size_mult = (card.csd[1] >> 7) & 0x7;
-            let read_bl_len = (card.csd[2] >> 8) & 0xF;
+        //     debug!("eMMC capacity: {} blocks ({} bytes)", 
+        //         card.capacity_blocks, card.capacity_blocks * 512);
+        // } else {
+        //     // For newer eMMC rev4.4+, may need to read Extended CSD
+        //     let c_size = ((card.csd[2] & 0x3) << 10) | ((card.csd[1] >> 22) & 0x3FF);
+        //     let c_size_mult = (card.csd[1] >> 7) & 0x7;
+        //     let read_bl_len = (card.csd[2] >> 8) & 0xF;
             
-            let block_size = 1 << read_bl_len;
-            let mult = 1 << (c_size_mult + 2);
-            let capacity = (c_size + 1) as u64 * mult as u64 * block_size as u64;
-            card.capacity_blocks = capacity / 512;
+        //     let block_size = 1 << read_bl_len;
+        //     let mult = 1 << (c_size_mult + 2);
+        //     let capacity = (c_size + 1) as u64 * mult as u64 * block_size as u64;
+        //     card.capacity_blocks = capacity / 512;
             
-            debug!("eMMC capacity (from CSD): {} blocks", card.capacity_blocks);
-        }
+        //     debug!("eMMC capacity (from CSD): {} blocks", card.capacity_blocks);
+        // }
 
-        // Set block size to 512 bytes (standard for eMMC)
-        card.block_size = 512;
+        // // Set block size to 512 bytes (standard for eMMC)
+        // card.block_size = 512;
 
-        // Send CMD7 to select the card
-        let cmd = EMmcCommand::new(MMC_SELECT_CARD, card.rca, MMC_RSP_R1B);
-        self.send_command(&cmd)?;
+        // // Send CMD7 to select the card
+        // let cmd = EMmcCommand::new(MMC_SELECT_CARD, card.rca, MMC_RSP_R1B);
+        // self.send_command(&cmd)?;
 
-        // Set block size to 512 bytes
-        let cmd = EMmcCommand::new(MMC_SET_BLOCKLEN, 512, MMC_RSP_R1);
-        self.send_command(&cmd)?;
+        // // Set block size to 512 bytes
+        // let cmd = EMmcCommand::new(MMC_SET_BLOCKLEN, 512, MMC_RSP_R1);
+        // self.send_command(&cmd)?;
         
-        // Switch to wider bus width if supported
-        if !self.is_write_protected() {
-            // For eMMC, use CMD6 to switch to wider bus width
-            // 8-bit bus width if hardware supports it
-            if self.supports_8bit_bus() {
-                // Add delay before bus width switch
-                for _ in 0..10000 {
-                    let _ = self.read_reg8(EMMC_POWER_CTRL);
-                }
+        // // Switch to wider bus width if supported
+        // if !self.is_write_protected() {
+        //     // For eMMC, use CMD6 to switch to wider bus width
+        //     // 8-bit bus width if hardware supports it
+        //     if self.supports_8bit_bus() {
+        //         // Add delay before bus width switch
+        //         for _ in 0..10000 {
+        //             let _ = self.read_reg8(EMMC_POWER_CTRL);
+        //         }
                 
-                let cmd = EMmcCommand::new(MMC_SWITCH, 
-                                        (3 << 24) | (183 << 16) | (2 << 8) | 1, 
-                                        MMC_RSP_R1B);
-                if self.send_command(&cmd).is_ok() {
-                    // Set controller to 8-bit mode
-                    let ctrl = self.read_reg8(EMMC_HOST_CTRL1);
-                    self.write_reg8(EMMC_HOST_CTRL1, ctrl | EMMC_CTRL_8BITBUS);
-                    info!("eMMC: Switched to 8-bit bus width");
+        //         let cmd = EMmcCommand::new(MMC_SWITCH, 
+        //                                 (3 << 24) | (183 << 16) | (2 << 8) | 1, 
+        //                                 MMC_RSP_R1B);
+        //         if self.send_command(&cmd).is_ok() {
+        //             // Set controller to 8-bit mode
+        //             let ctrl = self.read_reg8(EMMC_HOST_CTRL1);
+        //             self.write_reg8(EMMC_HOST_CTRL1, ctrl | EMMC_CTRL_8BITBUS);
+        //             info!("eMMC: Switched to 8-bit bus width");
                     
-                    // Add delay after bus width switch
-                    for _ in 0..10000 {
-                        let _ = self.read_reg8(EMMC_POWER_CTRL);
-                    }
-                }
-            } else {
-                // Try 4-bit bus width
-                let cmd = EMmcCommand::new(MMC_SWITCH, 
-                                        (3 << 24) | (183 << 16) | (1 << 8) | 1, 
-                                        MMC_RSP_R1B);
-                if self.send_command(&cmd).is_ok() {
-                    // Set controller to 4-bit mode
-                    let ctrl = self.read_reg8(EMMC_HOST_CTRL1);
-                    self.write_reg8(EMMC_HOST_CTRL1, ctrl | EMMC_CTRL_4BITBUS);
-                    info!("eMMC: Switched to 4-bit bus width");
+        //             // Add delay after bus width switch
+        //             for _ in 0..10000 {
+        //                 let _ = self.read_reg8(EMMC_POWER_CTRL);
+        //             }
+        //         }
+        //     } else {
+        //         // Try 4-bit bus width
+        //         let cmd = EMmcCommand::new(MMC_SWITCH, 
+        //                                 (3 << 24) | (183 << 16) | (1 << 8) | 1, 
+        //                                 MMC_RSP_R1B);
+        //         if self.send_command(&cmd).is_ok() {
+        //             // Set controller to 4-bit mode
+        //             let ctrl = self.read_reg8(EMMC_HOST_CTRL1);
+        //             self.write_reg8(EMMC_HOST_CTRL1, ctrl | EMMC_CTRL_4BITBUS);
+        //             info!("eMMC: Switched to 4-bit bus width");
                     
-                    // Add delay after bus width switch
-                    for _ in 0..10000 {
-                        let _ = self.read_reg8(EMMC_POWER_CTRL);
-                    }
-                }
-            }
-        }
+        //             // Add delay after bus width switch
+        //             for _ in 0..10000 {
+        //                 let _ = self.read_reg8(EMMC_POWER_CTRL);
+        //             }
+        //         }
+        //     }
+        // }
 
-        // Set higher clock speed for data transfer
-        // Start with a safe speed, can be increased based on ext_csd capabilities
-        self.set_clock(26000000)?; // 26 MHz for standard eMMC
+        // // Set higher clock speed for data transfer
+        // // Start with a safe speed, can be increased based on ext_csd capabilities
+        // self.rockchip_sdhci_set_clock(26000000)?; // 26 MHz for standard eMMC
         
-        // Card is initialized
-        card.initialized.store(true, Ordering::SeqCst);
-        card.state |= MMC_STATE_PRESENT;
+        // // Card is initialized
+        // card.initialized.store(true, Ordering::SeqCst);
+        // card.state |= MMC_STATE_PRESENT;
 
-        // Store the card in the host
-        self.card = Some(card);
+        // // Store the card in the host
+        // self.card = Some(card);
 
-        info!("eMMC initialization complete");
+        // info!("eMMC initialization complete");
         Ok(())
     }
 

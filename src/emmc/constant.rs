@@ -91,7 +91,7 @@ pub const EMMC_CMD_RESP_MASK: u16 = 0x03;
 pub const EMMC_CMD_CRC: u16 = 0x08;
 pub const EMMC_CMD_INDEX: u16 = 0x10;
 pub const EMMC_CMD_DATA: u16 = 0x20;
-pub const EMMC_CMD_ABORTCMD: u32	= 0xC0;
+pub const EMMC_CMD_ABORTCMD: u32 = 0xC0;
 
 pub const EMMC_CMD_RESP_NONE: u16 = 0x00;
 pub const EMMC_CMD_RESP_LONG: u16 = 0x01;
@@ -114,10 +114,10 @@ pub const EMMC_CARD_INSERTED: u32 = 0x00010000;
 pub const EMMC_WRITE_PROTECT: u32 = 0x00080000;
 
 // EMMC host control flags
-pub const EMMC_CTRL_LED: u8 = 0x01;
 pub const EMMC_CTRL_4BITBUS: u8 = 0x02;
 pub const EMMC_CTRL_HISPD: u8 = 0x04;
 pub const EMMC_CTRL_DMA_MASK: u8 = 0x18;
+
 pub const EMMC_CTRL_SDMA: u8 = 0x00;
 pub const EMMC_CTRL_ADMA1: u8 = 0x08;
 pub const EMMC_CTRL_ADMA32: u8 = 0x10;
@@ -138,15 +138,12 @@ pub const EMMC_RESET_DATA: u8 = 0x04;
 // EMMC interrupt flags
 pub const EMMC_INT_RESPONSE: u32 = 0x00000001;
 pub const EMMC_INT_DATA_END: u32 = 0x00000002;
-pub const EMMC_INT_BLK_GAP: u32 = 0x00000004;
 pub const EMMC_INT_DMA_END: u32 = 0x00000008;
 pub const EMMC_INT_SPACE_AVAIL: u32 = 0x00000010;
 pub const EMMC_INT_DATA_AVAIL: u32 = 0x00000020;
 pub const EMMC_INT_CARD_INSERT: u32 = 0x00000040;
 pub const EMMC_INT_CARD_REMOVE: u32 = 0x00000080;
 pub const EMMC_INT_CARD_INT: u32 = 0x00000100;
-pub const EMMC_INT_RETUNE: u32 = 0x00001000;
-pub const EMMC_INT_CQE	: u32 = 0x00004000;
 pub const EMMC_INT_ERROR: u32 = 0x00008000;
 pub const EMMC_INT_TIMEOUT: u32 = 0x00010000;
 pub const EMMC_INT_CRC: u32 = 0x00020000;
@@ -156,15 +153,18 @@ pub const EMMC_INT_DATA_TIMEOUT: u32 = 0x00100000;
 pub const EMMC_INT_DATA_CRC: u32 = 0x00200000;
 pub const EMMC_INT_DATA_END_BIT: u32 = 0x00400000;
 pub const EMMC_INT_BUS_POWER: u32 = 0x00800000;
-const EMMC_INT_AUTO_CMD_ERR: u32 = 0x01000000;
-const EMMC_INT_ADMA_ERROR: u32 = 0x02000000;
+pub const EMMC_INT_AUTO_CMD_ERR: u32 = 0x01000000;
+pub const EMMC_INT_ADMA_ERROR: u32 = 0x02000000;
 
 pub const EMMC_INT_NORMAL_MASK: u32 = 0x00007FFF;
 pub const EMMC_INT_ERROR_MASK: u32 = 0xFFFF8000;
 
-pub const EMMC_INT_CMD_MASK: u32 = EMMC_INT_RESPONSE | EMMC_INT_TIMEOUT | EMMC_INT_CRC | EMMC_INT_END_BIT | EMMC_INT_INDEX | EMMC_INT_AUTO_CMD_ERR;
-pub const EMMC_INT_DATA_MASK: u32 = EMMC_INT_DATA_END | EMMC_INT_DATA_TIMEOUT | EMMC_INT_DATA_CRC | EMMC_INT_DATA_END_BIT | EMMC_INT_ADMA_ERROR;
-pub const EMMC_INT_ALL_MASK: u32 = EMMC_INT_CMD_MASK | EMMC_INT_DATA_MASK;
+pub const EMMC_INT_CMD_MASK: u32 = EMMC_INT_RESPONSE | EMMC_INT_TIMEOUT | 
+                                   EMMC_INT_CRC | EMMC_INT_END_BIT | EMMC_INT_INDEX;
+pub const EMMC_INT_DATA_MASK: u32 = EMMC_INT_DATA_END | EMMC_INT_DMA_END | EMMC_INT_DATA_AVAIL | 
+                                    EMMC_INT_SPACE_AVAIL | EMMC_INT_DATA_TIMEOUT | EMMC_INT_DATA_CRC | 
+                                    EMMC_INT_DATA_END_BIT | EMMC_INT_ADMA_ERROR;
+pub const EMMC_INT_ALL_MASK: u32 = 0xFFFFFFFF;
 
 // SD/MMC Command definitions
 // Basic commands (class 0 and class 1)
@@ -267,3 +267,118 @@ pub const EXT_CSD_HS_TIMING: u8 = 185;      // 高速时序索引
 pub const EXT_CSD_BUS_WIDTH_1: u8 = 0;      // 1位模式
 pub const EXT_CSD_BUS_WIDTH_4: u8 = 1;      // 4位模式
 pub const EXT_CSD_BUS_WIDTH_8: u8 = 2;      // 8位模式
+
+pub const EMMC_CAP_SDR104: u32 = 1 << 1;
+pub const EMMC_DATA_AVAILABLE: u32 = 1 << 11;
+
+pub const DWCMSHC_HOST_CTRL3: u32 = 0x508;
+pub const DWCMSHC_EMMC_CONTROL: u32 = 0x52c;
+pub const DWCMSHC_EMMC_ATCTRL: u32 = 0x540;
+pub const DWCMSHC_EMMC_DLL_CTRL: u32 = 0x800;
+pub const DWCMSHC_EMMC_DLL_CTRL_RESET: u32 = 1 << 1;
+pub const DWCMSHC_EMMC_DLL_RXCLK: u32 = 0x804;
+pub const DWCMSHC_EMMC_DLL_TXCLK: u32 = 0x808;
+pub const DWCMSHC_EMMC_DLL_STRBIN: u32 = 0x80c;
+pub const DECMSHC_EMMC_DLL_CMDOUT: u32 = 0x810;
+pub const DWCMSHC_EMMC_DLL_STATUS0: u32 = 0x840;
+pub const DWCMSHC_EMMC_DLL_STATUS1: u32 = 0x844;
+
+pub const DWCMSHC_EMMC_DLL_START: u32 = 1 << 0;
+pub const DWCMSHC_EMMC_DLL_START_POINT: u32 = 16;
+pub const DWCMSHC_EMMC_DLL_START_DEFAULT: u32 = 5;
+pub const DWCMSHC_EMMC_DLL_INC_VALUE: u32 = 2;
+pub const DWCMSHC_EMMC_DLL_INC: u32 = 8;
+pub const DWCMSHC_EMMC_DLL_BYPASS: u32 = 1 << 24;
+pub const DWCMSHC_EMMC_DLL_DLYENA: u32 = 1 << 27;
+pub const DLL_TXCLK_TAPNUM_DEFAULT: u32 = 0x10;
+pub const DLL_TXCLK_TAPNUM_90_DEGREES: u32 = 0x9;
+pub const DLL_STRBIN_TAPNUM_DEFAULT: u32 = 0x4;
+pub const DLL_STRBIN_DELAY_NUM_OFFSET: u32 = 16;
+pub const DLL_STRBIN_TAPNUM_FROM_SW: u32 = 1 << 24;
+pub const DLL_STRBIN_DELAY_NUM_SEL: u32 = 1 << 26;
+pub const DLL_TXCLK_TAPNUM_FROM_SW: u32 = 1 << 24;
+pub const DLL_TXCLK_NO_INVERTER: u32 = 1 << 29;
+pub const DWCMSHC_EMMC_DLL_LOCKED: u32 = 1 << 8;
+pub const DWCMSHC_EMMC_DLL_TIMEOUT: u32 = 1 << 9;
+pub const DLL_TAP_VALUE_SEL: u32 = 1 << 25;
+pub const DLL_TAP_VALUE_OFFSET: u32 = 8;
+pub const DLL_RXCLK_NO_INVERTER: u32 = 1 << 29;
+pub const DLL_RXCLK_ORI_GATE: u32 = 1 << 31;
+pub const DLL_CMDOUT_TAPNUM_90_DEGREES: u32 = 0x8;
+pub const DLL_CMDOUT_TAPNUM_FROM_SW: u32 = 1 << 24;
+pub const DLL_CMDOUT_SRC_CLK_NEG: u32 = 1 << 28;
+pub const DLL_CMDOUT_EN_SRC_CLK_NEG: u32 = 1 << 29;
+pub const DLL_CMDOUT_BOTH_CLK_EDGE: u32 = 1 << 30;
+
+// HS400模式控制
+pub const DWCMSHC_CTRL_HS400: u16 = 0x7;
+pub const DWCMSHC_CARD_IS_EMMC: u32 = 1 << 0;
+pub const DWCMSHC_ENHANCED_STROBE: u32 = 1 << 8;
+
+// 芯片特性标志
+pub const RK_DLL_CMD_OUT: u32 = 1 << 1;
+pub const RK_RXCLK_NO_INVERTER: u32 = 1 << 2;
+pub const RK_TAP_VALUE_SEL: u32 = 1 << 3;
+
+// 时序模式定义
+pub const MMC_TIMING_LEGACY: u32 = 0;
+pub const MMC_TIMING_MMC_HS: u32 = 1;
+pub const MMC_TIMING_SD_HS: u32 = 2;
+pub const MMC_TIMING_UHS_SDR12: u32 = 3;
+pub const MMC_TIMING_UHS_SDR25: u32 = 4;
+pub const MMC_TIMING_UHS_SDR50: u32 = 5;
+pub const MMC_TIMING_UHS_SDR104: u32 = 6;
+pub const MMC_TIMING_UHS_DDR50: u32 = 7;
+pub const MMC_TIMING_MMC_DDR52: u32 = 8;
+pub const MMC_TIMING_MMC_HS200: u32 = 9;
+pub const MMC_TIMING_MMC_HS400: u32 = 10;
+pub const MMC_TIMING_MMC_HS400ES: u32 = 11;
+
+// 错误中断状态位
+pub const EMMC_INT_ERR_CMD_TIMEOUT: u32 = 0x0001;
+pub const EMMC_INT_ERR_CMD_CRC: u32 = 0x0002;
+pub const EMMC_INT_ERR_CMD_END_BIT: u32 = 0x0004;
+pub const EMMC_INT_ERR_CMD_INDEX: u32 = 0x0008;
+pub const EMMC_INT_ERR_DATA_TIMEOUT: u32 = 0x0010;
+pub const EMMC_INT_ERR_DATA_CRC: u32 = 0x0020;
+pub const EMMC_INT_ERR_DATA_END_BIT: u32 = 0x0040;
+
+pub const EMMC_SPEC_VER_MASK: u16 = 0x00FF;
+pub const EMMC_SPEC_VER_SHIFT: u32 = 0;
+pub const EMMC_SPEC_100: u16 = 0;
+pub const EMMC_SPEC_200: u16 = 1;
+pub const EMMC_SPEC_300: u16 = 2;
+
+pub const EMMC_CLOCK_MUL_MASK: u32 = 0x00FF0000;
+pub const EMMC_CLOCK_MUL_SHIFT: u32 = 16;
+
+pub const EMMC_CLOCK_BASE_MASK: u32 = 0x00003F00;
+pub const EMMC_CLOCK_V3_BASE_MASK: u32 = 0x0000FF00;
+pub const EMMC_CLOCK_BASE_SHIFT: u32 = 8;
+
+pub const EMMC_CAN_VDD_330: u32 = 1 << 24;
+pub const EMMC_CAN_VDD_300: u32 = 1 << 25;
+pub const EMMC_CAN_VDD_180: u32 = 1 << 26;
+
+pub const MMC_VDD_165_195: usize = 0x00000080;	/* VDD voltage 1.65 - 1.95 */
+pub const MMC_VDD_20_21: usize = 0x00000100;	/* VDD voltage 2.0 ~ 2.1 */
+pub const MMC_VDD_21_22: usize = 0x00000200;	/* VDD voltage 2.1 ~ 2.2 */
+pub const MMC_VDD_22_23: usize = 0x00000400;	/* VDD voltage 2.2 ~ 2.3 */
+pub const MMC_VDD_23_24: usize = 0x00000800;	/* VDD voltage 2.3 ~ 2.4 */
+pub const MMC_VDD_24_25: usize = 0x00001000;	/* VDD voltage 2.4 ~ 2.5 */
+pub const MMC_VDD_25_26: usize = 0x00002000;	/* VDD voltage 2.5 ~ 2.6 */
+pub const MMC_VDD_26_27: usize = 0x00004000;	/* VDD voltage 2.6 ~ 2.7 */
+pub const MMC_VDD_27_28: usize = 0x00008000;	/* VDD voltage 2.7 ~ 2.8 */
+pub const MMC_VDD_28_29: usize = 0x00010000;	/* VDD voltage 2.8 ~ 2.9 */
+pub const MMC_VDD_29_30: usize = 0x00020000;	/* VDD voltage 2.9 ~ 3.0 */
+pub const MMC_VDD_30_31: usize = 0x00040000;	/* VDD voltage 3.0 ~ 3.1 */
+pub const MMC_VDD_31_32: usize = 0x00080000;	/* VDD voltage 3.1 ~ 3.2 */
+pub const MMC_VDD_32_33: usize = 0x00100000;	/* VDD voltage 3.2 ~ 3.3 */
+pub const MMC_VDD_33_34: usize = 0x00200000;	/* VDD voltage 3.3 ~ 3.4 */
+pub const MMC_VDD_34_35: usize = 0x00400000;	/* VDD voltage 3.4 ~ 3.5 */
+pub const MMC_VDD_35_36: usize = 0x00800000;	/* VDD voltage 3.5 ~ 3.6 */
+
+pub const EMMC_POWER_ON: u8 = 0x01;
+pub const EMMC_POWER_180: u8= 0x0A;
+pub const EMMC_POWER_300: u8= 0x0C;
+pub const EMMC_POWER_330: u8= 0x0E;

@@ -106,11 +106,13 @@ impl SdHost {
         // Reset the controller
         self.reset_all()?;
 
-        info!("checkpoint 00");
+        debug!("EMMC Normal Int Status: 0x{:x}", self.read_reg(SDHCI_INT_STATUS));
 
         // Enable interrupts
-        self.write_reg(SDHCI_INT_ENABLE, SDHCI_INT_ALL_MASK);
-        self.write_reg(SDHCI_SIGNAL_ENABLE, SDHCI_INT_ALL_MASK);
+        self.write_reg(SDHCI_INT_ENABLE, 0xFFFFFFFF);
+        self.write_reg(SDHCI_SIGNAL_ENABLE, 0xFFFFFFFF);
+
+        debug!("EMMC Normal Int Status: 0x{:x}", self.read_reg(SDHCI_INT_STATUS));
 
         // Set initial clock and power
         self.set_clock(400000)?; // Start with 400 KHz for initialization
@@ -261,19 +263,16 @@ impl SdHost {
 
     // Initialize the card
     fn init_card(&mut self) -> Result<(), SdError> {
-        info!("checkpoint 000");
-
         // Send CMD0 to reset the card
         let cmd = SdCommand::new(MMC_GO_IDLE_STATE, 0, MMC_RSP_NONE);
         self.send_command(&cmd)?;
-
-        info!("checkpoint 001");
 
         // Send CMD8 to check SD Card version (SD v2 specific)
         let check_pattern = 0xAA;
         let mut voltage = 0x100; // 2.7-3.6V
         let cmd = SdCommand::new(SD_SEND_IF_COND, voltage | check_pattern, MMC_RSP_R7);
         let res = self.send_command(&cmd);
+        info!("CMD8 response: {:?}", res);
         let card_type = if res.is_ok() {
             // SD v2 or later
             let response = self.get_response().as_r7();
@@ -288,9 +287,6 @@ impl SdHost {
             // SD v1 or MMC
             CardType::SdV1
         };
-
-        info!("checkpoint 002 {:?}", card_type);
-
         // Initialize the card
         let mut card = SdCard::init(self.base_addr, card_type);
 
@@ -298,9 +294,6 @@ impl SdHost {
         let mut ocr = 0x40FF8000; // HCS = 1, voltage window = 2.7-3.6V
         let mut retry = 100;
         let mut ready = false;
-
-        info!("checkpoint 005");
-
         while retry > 0 && !ready {
             // Send CMD55 (APP_CMD) before ACMD
             let cmd = SdCommand::new(MMC_APP_CMD, card.rca, MMC_RSP_R1);
@@ -311,6 +304,8 @@ impl SdHost {
             self.send_command(&cmd)?;
             let response = self.get_response();
             ocr = response.as_r3();
+
+            info!("ACMD41 response: 0x{:x}", ocr);
 
             // Check if card is ready
             if (ocr & (1 << 31)) != 0 {
@@ -328,15 +323,9 @@ impl SdHost {
                 }
             }
         }
-
-        info!("checkpoint 003");
-
         if !ready {
             return Err(SdError::UnsupportedCard);
         }
-
-        info!("checkpoint 004");
-
         // Send CMD2 to get CID
         let cmd = SdCommand::new(MMC_ALL_SEND_CID, 0, MMC_RSP_R2);
         self.send_command(&cmd)?;

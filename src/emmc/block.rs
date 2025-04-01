@@ -1,6 +1,8 @@
 // ===== Block Device Interface =====
 
 use core::sync::atomic::{AtomicBool, Ordering};
+use log::debug;
+
 use crate::err::SdError;
 
 use super::{cmd::EMmcCommand, constant::*, CardType, EMmcHost};
@@ -18,32 +20,39 @@ pub trait BlockDevice {
 // EMmc Card structure
 #[derive(Debug)]
 pub struct EMmcCard {
-    pub _base_addr: usize,
-    pub rca: u32, // Relative Card Address
+    base_addr: usize,
+    pub card_type: CardType,
+    pub rca: u32,
+    pub ocr: u32,
     pub cid: [u32; 4],
     pub csd: [u32; 4],
-    pub ocr: u32,
-    pub card_type: CardType,
     pub state: u32,
-    pub initialized: AtomicBool,
     pub block_size: u32,
     pub capacity_blocks: u64,
+    pub initialized: AtomicBool,
+
+    // 扩展CSD相关字段
+    pub ext_csd_rev: u8,
+    pub ext_csd_sectors: u64,
+    pub hs_max_dtr: u32,
 }
 
 impl EMmcCard {
-    #[allow(unused)]
-    pub fn init(_base_addr: usize, card_type: CardType) -> Self {
+    pub fn init(base_addr: usize, card_type: CardType) -> Self {
         Self {
-            _base_addr,
+            base_addr,
+            card_type,
             rca: 0,
+            ocr: 0,
             cid: [0; 4],
             csd: [0; 4],
-            ocr: 0,
-            card_type,
             state: 0,
-            initialized: AtomicBool::new(false),
-            block_size: 512,
+            block_size: 0,
             capacity_blocks: 0,
+            initialized: AtomicBool::new(false),
+            ext_csd_rev: 0,
+            ext_csd_sectors: 0,
+            hs_max_dtr: 0,
         }
     }
 }

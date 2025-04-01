@@ -1,3 +1,5 @@
+use log::{debug, info};
+
 use crate::err::SdError;
 
 use super::{constant::*, SdHost};
@@ -132,6 +134,8 @@ impl SdHost {
 
         // Send the command
         self.write_reg16(SDHCI_COMMAND, command);
+
+        info!("Sending command: {:#b}", command);
 
         // Wait for command completion
         timeout = 100000;

@@ -21,6 +21,10 @@ pub enum SdError {
     CommandError,
     TransferError,
     InvalidResponseType,
+    CurrentLimit,
+    DataError,
+    TuningFailed,
+    VoltageSwitchFailed,
     CardError(u32, &'static str), // 包含错误状态和描述
 }
 
@@ -44,6 +48,10 @@ impl fmt::Display for SdError {
             SdError::CommandError => write!(f, "Command error"),
             SdError::TransferError => write!(f, "Transfer error"),
             SdError::InvalidResponseType => write!(f, "Invalid response type"),
+            SdError::CurrentLimit => write!(f, "Current limit error"),
+            SdError::DataError => write!(f, "Data error"),
+            SdError::TuningFailed => write!(f, "Tuning failed"),
+            SdError::VoltageSwitchFailed => write!(f, "Voltage switch failed"),
             SdError::CardError(status, desc) => write!(f, "Card error: 0x{:X} ({})", status, desc),
         }
     }
