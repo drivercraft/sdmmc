@@ -78,6 +78,8 @@ impl EMmcHost {
             }
             timeout -= 1;
         }
+
+        info!("Sending command: opcode={:#x}, arg={:#x}, resp_type={:#x}", cmd.opcode, cmd.arg, cmd.resp_type);
     
         // Set argument
         self.write_reg(EMMC_ARGUMENT, cmd.arg);
@@ -128,22 +130,24 @@ impl EMmcHost {
             command |= EMMC_CMD_DATA;
         }
     
-        info!("Sending command: {:#b}", command);
+        info!("Sending command: {:#018b}", command);
     
         // Send the command
         self.write_reg16(EMMC_COMMAND, command);
     
         // Use longer timeout for initialization commands
         let timeout_val = if cmd.opcode == MMC_GO_IDLE_STATE || cmd.opcode == MMC_SEND_OP_COND {
-            500000  // Longer timeout for initialization commands
+            5000000  // Longer timeout for initialization commands
         } else {
-            100000  // Standard timeout
+            1000000  // Standard timeout
         };
     
         // Wait for command completion using polling
         let mut timeout = timeout_val;
         while timeout > 0 {
             let status = self.read_reg16(EMMC_NORMAL_INT_STAT);
+
+            info!("Polling status: {:#b}", status);
 
             // Check for command completion
             if status & EMMC_INT_RESPONSE as u16 != 0 {
@@ -170,6 +174,9 @@ impl EMmcHost {
                     // Clear error status
                     self.write_reg16(EMMC_NORMAL_INT_STAT, status);
                     self.write_reg16(EMMC_ERROR_INT_STAT, err_status);
+
+                    debug!("EMMC Normal Int Status: 0x{:x}", self.read_reg16(EMMC_NORMAL_INT_STAT));
+                    debug!("EMMC Error Int Status: 0x{:x}", self.read_reg16(EMMC_ERROR_INT_STAT));
                     
                     // Map specific error types
                     let err = if err_status & 0x1 != 0 {
@@ -261,7 +268,7 @@ impl EMmcHost {
     }
 
     // Reset command line
-    fn reset_cmd(&self) -> Result<(), SdError> {
+    pub fn reset_cmd(&self) -> Result<(), SdError> {
         self.write_reg8(EMMC_SOFTWARE_RESET, EMMC_RESET_CMD);
 
         // Wait for reset to complete

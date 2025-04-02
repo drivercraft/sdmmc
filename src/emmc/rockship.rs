@@ -31,72 +31,57 @@ impl EMmcHost {
 
         // 根据SDHCI规范版本计算分频器
         let mut div = 0;
+        let mut clk = 0u16;
         let sdhci_version = self.read_reg16(EMMC_HOST_CNTRL_VER);
         
-        // SDHCI规范3.0及以上
-        if (sdhci_version & 0xFF) >= 0x30 {
-            // 检查是否支持可编程时钟模式
-            let clk_mul = (self.caps >> 16) & 0xFF;
-            
+        if (sdhci_version & 0x00FF) >= EMMC_SPEC_300 {
+            let caps2 = self.read_reg(EMMC_CAPABILITIES2);
+            let clk_mul = (caps2 & EMMC_CLOCK_MUL_MASK) >> EMMC_CLOCK_MUL_SHIFT;
+
+            info!("EMMC Clock Mul: {}", clk_mul);
+
+            // Check if the Host Controller supports Programmable Clock Mode.
             if clk_mul != 0 {
-                // 可编程时钟模式
                 for i in 1..=1024 {
                     if (input_clk / i) <= freq {
                         div = i;
                         break;
                     }
                 }
-                
+                // Set Programmable Clock Mode in the Clock Control register.
+                clk = EMMC_PROG_CLOCK_MODE;
                 div -= 1;
             } else {
-                // 版本3.00的分频器必须是2的倍数
+                // Version 3.00 divisors must be a multiple of 2.
                 if input_clk <= freq {
-                    div = 0;
+                    div = 1;
                 } else {
-                    for i in (2..=2046).step_by(2) {
-                        if (input_clk / i) <= freq {
+                    for i in (2 ..= 2046).step_by(2) {
+                        if (input_clk / i ) <= freq {
                             div = i;
                             break;
                         }
                     }
                 }
-                div >>= 1; // 右移1位相当于除以2
+                div >>= 1;
             }
         } else {
-            // 版本2.00的分频器必须是2的幂
+            // Version 2.00 divisors must be a power of 2.
             let mut i = 1;
             while i < 256 && (input_clk / i) > freq {
                 i *= 2;
             }
-            div = i >> 1; // 右移1位相当于除以2
+            div = i >> 1;
         }
 
-        // 构建时钟控制寄存器值
-        let mut clk = 0u16;
-        
-        // 如果支持可编程时钟模式且使用它
-        if (sdhci_version & 0xFF) >= 0x30 && (self.caps >> 16) & 0xFF != 0 {
-            clk = EMMC_PROG_CLOCK_MODE;
-        }
-        
-        // 设置分频器
+        info!("EMMC Clock Divisor: {}", div);
+
         clk |= ((div as u16) & 0xFF) << EMMC_DIVIDER_SHIFT;
         clk |= (((div as u16) & 0x300) >> 8) << EMMC_DIVIDER_HI_SHIFT;
         clk |= EMMC_CLOCK_INT_EN;
-        
-        // 写入时钟控制寄存器
+
         self.write_reg16(EMMC_CLOCK_CONTROL, clk);
         
-        // 等待内部时钟稳定
-        timeout = 100000;
-        while (self.read_reg16(EMMC_CLOCK_CONTROL) & EMMC_CLOCK_INT_STABLE) == 0 {
-            timeout -= 1;
-            if timeout == 0 {
-                return Err(SdError::Timeout);
-            }
-        }
-        
-        // 使能卡时钟
         self.enable_card_clock()?;
         
         Ok(())
@@ -105,9 +90,11 @@ impl EMmcHost {
     // DWCMSHC SDHCI EMMC设置时钟
     fn dwcmshc_sdhci_emmc_set_clock(&mut self, freq: u32) -> Result<(), SdError> {
         self.rockship_emmc_set_clock(freq)?;
+
+        info!("Clock {:#x}", self.read_reg16(EMMC_CLOCK_CONTROL));
         
-        // 禁用输出时钟，以便配置DLL
-        self.write_reg16(EMMC_CLOCK_CONTROL, 0);
+        // // Disable output clock while config DLL
+        // self.write_reg16(EMMC_CLOCK_CONTROL, 0);
         
         // // DLL配置基于频率
         // if freq >= 100_000_000 { // 100 MHz
@@ -227,7 +214,7 @@ impl EMmcHost {
             // Disable cmd conflict check
             let mut extra = self.read_reg(DWCMSHC_HOST_CTRL3);
             debug!("extra: {:#b}", extra);
-            extra &= !0x1; // ~BIT(0)
+            extra &= !0x1;
             self.write_reg(DWCMSHC_HOST_CTRL3, extra);
             
             // reset the clock phase when the frequency is lower than 100MHz
@@ -245,17 +232,30 @@ impl EMmcHost {
                         (ddr50_strbin_delay_num << DLL_STRBIN_DELAY_NUM_OFFSET);
             self.write_reg(DWCMSHC_EMMC_DLL_STRBIN, extra);
         // }
-        
-        // enable output clock
+
+        // Enable card clock
         self.enable_card_clock()?;
-        
+
         Ok(())
     }
     
-    // 启用卡时钟辅助函数
     pub fn enable_card_clock(&mut self) -> Result<(), SdError> {
+        let mut clk = self.read_reg16(EMMC_CLOCK_CONTROL);
+        clk |= EMMC_CLOCK_INT_EN;
+        self.write_reg16(EMMC_CLOCK_CONTROL, clk);
+
+        let mut timeout = 100000;
+        while (self.read_reg16(EMMC_CLOCK_CONTROL) & EMMC_CLOCK_INT_STABLE) == 0 {
+            timeout -= 1;
+            if timeout == 0 {
+                info!("Internal clock never stabilised.");
+                return Err(SdError::Timeout);
+            }
+        }    
+
         let clk = self.read_reg16(EMMC_CLOCK_CONTROL);
         self.write_reg16(EMMC_CLOCK_CONTROL, clk | EMMC_CLOCK_CARD_EN);
+
         Ok(())
     }
     
@@ -319,11 +319,12 @@ impl EMmcHost {
         // 这里假设我们使用DWCMSHC控制器
         self.dwcmshc_sdhci_set_enhanced_strobe()
     }
-}
 
-// DLL锁定检查辅助函数
-fn dll_lock_wo_tmout(x: u32) -> bool {
-    ((x & DWCMSHC_EMMC_DLL_LOCKED) == DWCMSHC_EMMC_DLL_LOCKED) && ((x & DWCMSHC_EMMC_DLL_TIMEOUT) == 0) // DWCMSHC_EMMC_DLL_LOCKED && !DWCMSHC_EMMC_DLL_TIMEOUT
+    pub fn is_clock_stable(&self) -> bool {
+        let clock_ctrl = self.read_reg16(EMMC_CLOCK_CONTROL);
+        // 检查内部时钟稳定位(通常是bit 1)
+        return (clock_ctrl & 0x0002) != 0;
+    }
 }
 
 const EMMC_PROG_CLOCK_MODE: u16 = 0x0020;

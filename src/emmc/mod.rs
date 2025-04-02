@@ -152,21 +152,22 @@ impl EMmcHost {
         self.set_xpower(1)?;
 
         // Set initial clock and wait for it to stabilize
-        self.rockchip_sdhci_set_clock(400000)?; // Start with 400 KHz for initialization
-        
+        self.rockchip_sdhci_set_clock(375000)?; // Start with 400 KHz for initialization
+        // self.set_clock(375000)?; // Start with 400 KHz for initialization
+    
         // Set initial bus width to 1-bit
         let ctrl = self.read_reg8(EMMC_HOST_CTRL1);
         self.write_reg8(EMMC_HOST_CTRL1, ctrl & !EMMC_CTRL_4BITBUS & !EMMC_CTRL_8BITBUS);
-        // self.rockchip_sdhci_set_ios_post();
+        self.rockchip_sdhci_set_ios_post();
 
         // Check if card is present
         if !self.is_card_present() {
             return Err(SdError::NoCard);
         }
 
-        // // Enable interrupts
-        self.write_reg(EMMC_NORMAL_INT_STAT_EN, EMMC_INT_CMD_MASK | EMMC_INT_CMD_MASK);
-        // self.write_reg(EMMC_SIGNAL_ENABLE, 0x0);
+        // Enable interrupts
+        self.write_reg(EMMC_NORMAL_INT_STAT_EN, EMMC_INT_CMD_MASK | EMMC_INT_DATA_MASK);
+        self.write_reg(EMMC_SIGNAL_ENABLE, 0x0);
 
         // Initialize the card
         self.init_card()?;
@@ -227,6 +228,9 @@ impl EMmcHost {
         // Disable clock first
         self.write_reg16(EMMC_CLOCK_CONTROL, 0);
 
+        // disable dll
+        self.write_reg(DWCMSHC_EMMC_DLL_CTRL, 0);
+        
         // Calculate divider
         // Clock = base_clock / (2 * div)
         let mut div = if self.clock_base <= freq {
@@ -332,9 +336,10 @@ impl EMmcHost {
             let response = self.get_response();
             ocr = response.as_r3();
 
+            info!("eMMC CMD1 response: {:#x}", ocr);
+
             // Check if card is ready (bit 31 set)
             if (ocr & (1 << 31)) != 0 {
-                info!("eMMC card ready ocr: {:#x}", ocr);
                 ready = true;
                 card.ocr = ocr;
                 if (ocr & (1 << 30)) != 0 {
@@ -356,9 +361,17 @@ impl EMmcHost {
             return Err(SdError::UnsupportedCard);
         }
 
-        for _ in 0..100000 {
-            let _ = self.read_reg8(EMMC_POWER_CTRL);
+        let mut timeout = 100000; 
+        loop {
+            timeout -= 1;
+            if timeout == 0 {
+                break;
+            }
         }
+
+        debug!("Clock control before CMD2: 0x{:x}, stable: {}", 
+        self.read_reg16(EMMC_CLOCK_CONTROL),
+        self.is_clock_stable());
 
         // Send CMD2 to get CID
         let cmd = EMmcCommand::new(MMC_ALL_SEND_CID, 0, MMC_RSP_R2);
