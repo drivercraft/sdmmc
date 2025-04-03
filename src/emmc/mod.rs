@@ -4,7 +4,7 @@ mod cmd;
 mod block;
 mod config;
 mod constant;
-mod rockship;
+mod rockchip;
 
 use core::{fmt::Display, sync::atomic::Ordering};
 use block::EMmcCard;
@@ -152,7 +152,7 @@ impl EMmcHost {
         self.set_xpower(1)?;
 
         // Set initial clock and wait for it to stabilize
-        self.rockchip_sdhci_set_clock(375000)?; // Start with 400 KHz for initialization
+        self.rockchip_sdhci_set_clock(400000)?; // Start with 400 KHz for initialization
         // self.set_clock(375000)?; // Start with 400 KHz for initialization
     
         // Set initial bus width to 1-bit
@@ -311,38 +311,59 @@ impl EMmcHost {
     // Initialize the eMMC card
     fn init_card(&mut self) -> Result<(), SdError> {
         info!("eMMC initialization started");
-        
-        // Send CMD0 to reset the card
-        let cmd = EMmcCommand::new(MMC_GO_IDLE_STATE, 0, MMC_RSP_NONE);
-        self.send_command(&cmd)?;
-
-        info!("eMMC reset complete");
-
         // For eMMC, we use CMD1 instead of ACMD41
         // HCS=1, voltage window for eMMC as per specs
-        let mut ocr = 0x40FF8080;
-        let mut retry = 100;
-        let mut ready = false;
+        let ocr = 0x00FF8080;
+        let retry = 100;
 
         // Create card structure
         let mut card = EMmcCard::init(self.base_addr, CardType::Mmc);
 
-        debug!("Power Status {:b}", self.read_reg8(EMMC_POWER_CTRL));
+        // Send CMD0 to reset the card
+        self.mmc_go_idle()?;
 
+        // Send CMD1 to set OCR and check if card is ready
+        self.mmc_send_op_cond(&mut card, ocr, retry)?;
+
+        // Send CMD2 to get CID
+        self.mmc_all_send_cid(&mut card)?;
+
+        // Send CMD3 to get RCA
+        self.mmc_set_relative_addr(&mut card)?;
+
+        // Send CMD9 to get CSD
+        self.mmc_send_csd(&mut card)?;
+
+        Ok(())
+    }
+
+    // Send CMD0 to reset the card
+    fn mmc_go_idle(&self)  -> Result<(), SdError>{
+        let cmd = EMmcCommand::new(MMC_GO_IDLE_STATE, 0, MMC_RSP_NONE);
+        self.send_command(&cmd)?;
+
+        info!("eMMC reset complete");
+        Ok(())
+    }
+
+    // Send CMD1 to set OCR and check if card is ready
+    fn mmc_send_op_cond(&self, card:&mut EMmcCard, ocr: u32, mut retry: u32) -> Result<(), SdError> {
+        let mut ready = false;
+        debug!("Power Status {:b}", self.read_reg8(EMMC_POWER_CTRL));
         while retry > 0 && !ready {
             // Send CMD1 for eMMC
             let cmd = EMmcCommand::new(MMC_SEND_OP_COND, ocr, MMC_RSP_R3);
             self.send_command(&cmd)?;
             let response = self.get_response();
-            ocr = response.as_r3();
+            let respr3 = response.as_r3();
 
-            info!("eMMC CMD1 response: {:#x}", ocr);
+            info!("eMMC CMD1 response: {:#x}", respr3);
 
             // Check if card is ready (bit 31 set)
-            if (ocr & (1 << 31)) != 0 {
+            if (respr3 & (1 << 31)) != 0 {
                 ready = true;
-                card.ocr = ocr;
-                if (ocr & (1 << 30)) != 0 {
+                card.ocr = respr3;
+                if (respr3 & (1 << 30)) != 0 {
                     card.card_type = CardType::MmcHc;
                     card.state |= MMC_STATE_HIGHCAPACITY;
                 }
@@ -372,9 +393,12 @@ impl EMmcHost {
         debug!("Clock control before CMD2: 0x{:x}, stable: {}", 
         self.read_reg16(EMMC_CLOCK_CONTROL),
         self.is_clock_stable());
+        Ok(())
+    }
 
-        // Send CMD2 to get CID
-        let cmd = EMmcCommand::new(MMC_ALL_SEND_CID, 0, MMC_RSP_R2);
+    // Send CMD2 to get CID
+    fn mmc_all_send_cid(&self, card: &mut EMmcCard) -> Result<(), SdError> {
+        let cmd: EMmcCommand = EMmcCommand::new(MMC_ALL_SEND_CID, 0, MMC_RSP_R2);
         self.send_command(&cmd)?;
         let response = self.get_response();
         card.cid = response.as_r2();
@@ -386,12 +410,19 @@ impl EMmcHost {
         // For eMMC, host assigns the RCA value (unlike SD where card provides it)
         let mmc_rca = 0x0002 << 16; // Typical RCA value for eMMC is 1
         card.rca = mmc_rca;
+        Ok(())
+    }
 
-        // Send CMD3 to set RCA for eMMC
+    // Send CMD3 to set RCA for eMMC
+    fn mmc_set_relative_addr(&self, card: &mut EMmcCard) -> Result<(), SdError> {
+
         let cmd = EMmcCommand::new(MMC_SET_RELATIVE_ADDR, card.rca, MMC_RSP_R1);
         self.send_command(&cmd)?;
+        Ok(())
+    }
 
-        // Send CMD9 to get CSD
+    // Send CMD9 to get CSD
+    fn mmc_send_csd(&self, card: &mut EMmcCard) -> Result<(), SdError> {
         let cmd = EMmcCommand::new(MMC_SEND_CSD, card.rca, MMC_RSP_R2);
         self.send_command(&cmd)?;
         let response = self.get_response();
@@ -404,6 +435,9 @@ impl EMmcHost {
         // Calculate card capacity from CSD
         let csd_version = (card.csd[3] >> 22) & 0x3;
         debug!("eMMC CSD version: {}", csd_version);
+        Ok(())
+    }
+
 
         // if csd_version <= 2 {            // Standard capacity calculation for older eMMC
         //     let c_size = ((card.csd[2] & 0x3) << 10) | ((card.csd[1] >> 22) & 0x3FF);
@@ -499,8 +533,7 @@ impl EMmcHost {
         // self.card = Some(card);
 
         // info!("eMMC initialization complete");
-        Ok(())
-    }
+
 
     // Helper function to check if controller supports 8-bit bus
     fn supports_8bit_bus(&self) -> bool {

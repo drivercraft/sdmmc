@@ -6,7 +6,7 @@ use super::{constant::*, EMmcHost};
 
 impl EMmcHost {
     // Rockchip EMMC设置时钟函数
-    fn rockship_emmc_set_clock(&mut self, freq: u32) -> Result<(), SdError> {
+    fn rockchip_emmc_set_clock(&mut self, freq: u32) -> Result<(), SdError> {
         // wait for command and data inhibit to be cleared
         let mut timeout = 200000;
         while (self.read_reg(EMMC_PRESENT_STATE) & (EMMC_CMD_INHIBIT | EMMC_DATA_INHIBIT)) != 0 {
@@ -89,7 +89,7 @@ impl EMmcHost {
 
     // DWCMSHC SDHCI EMMC设置时钟
     fn dwcmshc_sdhci_emmc_set_clock(&mut self, freq: u32) -> Result<(), SdError> {
-        self.rockship_emmc_set_clock(freq)?;
+        self.rockchip_emmc_set_clock(freq)?;
 
         info!("Clock {:#x}", self.read_reg16(EMMC_CLOCK_CONTROL));
         
