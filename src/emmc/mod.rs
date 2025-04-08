@@ -10,7 +10,7 @@ use core::{fmt::Display, sync::atomic::Ordering};
 use block::EMmcCard;
 use constant::*;
 use cmd::*;
-use crate::err::*;
+use crate::{delay_us, err::*, generic_fls};
 use log::{debug, info};
 
 #[derive(Debug, Clone, Copy)]
@@ -142,51 +142,39 @@ impl EMmcHost {
             return Err(SdError::UnsupportedCard);
         } 
 
-        info!("voltage range: {:#x}", voltages);
+        info!("voltage range: {:#x}", generic_fls(voltages as u32) - 1);
 
         // Reset the controller
         self.reset_all()?;
 
         // Perform full power cycle
-        // self.set_power(voltages)?; // Power on
-        self.set_xpower(1)?;
+        self.sdhci_set_power(generic_fls(voltages as u32) - 1)?;
 
-        // Set initial clock and wait for it to stabilize
-        self.rockchip_sdhci_set_clock(400000)?; // Start with 400 KHz for initialization
-        // self.set_clock(375000)?; // Start with 400 KHz for initialization
-    
+        // Enable interrupts
+        self.write_reg(EMMC_NORMAL_INT_STAT_EN, EMMC_INT_CMD_MASK | EMMC_INT_DATA_MASK);
+        self.write_reg(EMMC_SIGNAL_ENABLE, 0x0);
+
         // Set initial bus width to 1-bit
         let ctrl = self.read_reg8(EMMC_HOST_CTRL1);
+
+        info!("EMMC Host Control 1: {:#x}", ctrl & !EMMC_CTRL_4BITBUS & !EMMC_CTRL_8BITBUS);
+
         self.write_reg8(EMMC_HOST_CTRL1, ctrl & !EMMC_CTRL_4BITBUS & !EMMC_CTRL_8BITBUS);
-        self.rockchip_sdhci_set_ios_post();
+
+        debug!("EMMC Host Control 1 after reset: {:#x}", self.read_reg8(EMMC_HOST_CTRL2));
+
+        // Set initial clock and wait for it to stabilize
+        self.dwcmshc_sdhci_emmc_set_clock(400000)?; // Start with 400 KHz for initialization
 
         // Check if card is present
         if !self.is_card_present() {
             return Err(SdError::NoCard);
         }
 
-        // Enable interrupts
-        self.write_reg(EMMC_NORMAL_INT_STAT_EN, EMMC_INT_CMD_MASK | EMMC_INT_DATA_MASK);
-        self.write_reg(EMMC_SIGNAL_ENABLE, 0x0);
-
         // Initialize the card
         self.init_card()?;
         
         info!("EMMC initialization completed successfully");
-        Ok(())
-    }
-
-    fn set_xpower(&self, on: u8) -> Result<(), SdError> {
-        
-        // Set voltage level to 3.0 ~ 3.1V (0x0C)
-        let pwr = if on != 0 { 0x01 | 0x0E } else { 0 };
-        self.write_reg8(EMMC_POWER_CTRL, pwr);
-
-        // Small delay for power to stabilize
-        for _ in 0..20000 {
-            let _ = self.read_reg8(EMMC_POWER_CTRL);
-        }
-
         Ok(())
     }
 
@@ -223,79 +211,6 @@ impl EMmcHost {
         Ok(())
     }
 
-    // Set controller clock frequency
-    fn set_clock(&mut self, freq: u32) -> Result<(), SdError> {
-        // Disable clock first
-        self.write_reg16(EMMC_CLOCK_CONTROL, 0);
-
-        // disable dll
-        self.write_reg(DWCMSHC_EMMC_DLL_CTRL, 0);
-        
-        // Calculate divider
-        // Clock = base_clock / (2 * div)
-        let mut div = if self.clock_base <= freq {
-            0
-        } else {
-            ((self.clock_base + freq - 1) / freq) >> 1
-        };
-
-        // Check if divider is too large
-        if div > 0xFF {
-            div = 0xFF;
-        }
-
-        // Enable internal clock
-        let mut clk = ((div as u16) << (EMMC_CLOCK_DIV_SHIFT as u16)) | EMMC_CLOCK_INT_EN;
-        self.write_reg16(EMMC_CLOCK_CONTROL, clk);
-
-        // Wait for clock stability
-        let mut timeout = 100000;
-        loop {
-            clk = self.read_reg16(EMMC_CLOCK_CONTROL);
-            if (clk & EMMC_CLOCK_INT_STABLE) != 0 {
-                break;
-            }
-            if timeout == 0 {
-                return Err(SdError::Timeout);
-            }
-            timeout -= 1;
-        }
-
-        // Enable card clock
-        self.enable_card_clock()?;
-
-        Ok(())
-    }
-
-    // Set power to the card
-    fn set_power(&self, power: usize) -> Result<(), SdError> {
-        let mut pwr = 0;
-    
-        if power != usize::MAX {  // Equivalent to (unsigned short)-1 in C
-            match 1 << power {
-                MMC_VDD_165_195 => pwr = EMMC_POWER_180,
-                MMC_VDD_29_30 | MMC_VDD_30_31 => pwr = EMMC_POWER_300,
-                MMC_VDD_32_33 | MMC_VDD_33_34 => pwr = EMMC_POWER_330,
-                _ => {}
-            }
-        }
-    
-        if pwr == 0 {
-            self.write_reg8(EMMC_POWER_CTRL, 0);
-            return Ok(());
-        }
-    
-        pwr |= EMMC_POWER_ON;
-        self.write_reg8(EMMC_POWER_CTRL, pwr);
-    
-        // Small delay for power to stabilize
-        for _ in 0..20000 {
-            let _ = self.read_reg8(EMMC_POWER_CTRL);
-        }
-    
-        Ok(())
-    }
-
     // Check if card is present
     fn is_card_present(&self) -> bool {
         let state = self.read_reg(EMMC_PRESENT_STATE);
@@ -313,7 +228,7 @@ impl EMmcHost {
         info!("eMMC initialization started");
         // For eMMC, we use CMD1 instead of ACMD41
         // HCS=1, voltage window for eMMC as per specs
-        let ocr = 0x00FF8080;
+        let ocr = 0x000000;
         let retry = 100;
 
         // Create card structure
@@ -339,60 +254,78 @@ impl EMmcHost {
 
     // Send CMD0 to reset the card
     fn mmc_go_idle(&self)  -> Result<(), SdError>{
+
+        delay_us(1000);
+
         let cmd = EMmcCommand::new(MMC_GO_IDLE_STATE, 0, MMC_RSP_NONE);
         self.send_command(&cmd)?;
+
+        delay_us(2000);
 
         info!("eMMC reset complete");
         Ok(())
     }
 
     // Send CMD1 to set OCR and check if card is ready
-    fn mmc_send_op_cond(&self, card:&mut EMmcCard, ocr: u32, mut retry: u32) -> Result<(), SdError> {
+    fn mmc_send_op_cond(&self, card: &mut EMmcCard, ocr: u32, mut retry: u32) -> Result<(), SdError> {
+        // Go idle first
+        self.mmc_go_idle()?;
+        
+        info!("mmc_send_op_cond: Power Status {:b}", self.read_reg8(EMMC_POWER_CTRL));
+        
+        // First iteration - send without args to query capabilities
+        let mut cmd = EMmcCommand::new(MMC_SEND_OP_COND, 0, MMC_RSP_R3);
+        self.send_command(&cmd)?;
+        card.ocr = self.get_response().as_r3();
+        
+        info!("eMMC first CMD1 response (no args): {:#x}", card.ocr);
+        
+        // Calculate arg for next commands
+        let ocr_hcs = 0x40000000; // High Capacity Support
+        let ocr_busy = 0x80000000;
+        let ocr_voltage_mask = 0x007FFF80;
+        let ocr_access_mode = 0x60000000;
+        
+        let cmd_arg = ocr_hcs | (0x60000 | (card.ocr & ocr_voltage_mask)) | 
+                        (card.ocr & ocr_access_mode);
+        
+        info!("eMMC CMD1 arg for retries: {:#x}", cmd_arg);
+        
+        // Now retry with the proper argument until ready or timeout
         let mut ready = false;
-        debug!("Power Status {:b}", self.read_reg8(EMMC_POWER_CTRL));
         while retry > 0 && !ready {
-            // Send CMD1 for eMMC
-            let cmd = EMmcCommand::new(MMC_SEND_OP_COND, ocr, MMC_RSP_R3);
+            cmd = EMmcCommand::new(MMC_SEND_OP_COND, cmd_arg, MMC_RSP_R3);
             self.send_command(&cmd)?;
-            let response = self.get_response();
-            let respr3 = response.as_r3();
-
-            info!("eMMC CMD1 response: {:#x}", respr3);
-
-            // Check if card is ready (bit 31 set)
-            if (respr3 & (1 << 31)) != 0 {
+            card.ocr = self.get_response().as_r3();
+            
+            info!("eMMC CMD1 response: {:#x}", card.ocr);
+            
+            // Check if card is ready (OCR_BUSY flag set)
+            if (card.ocr & ocr_busy) != 0 {
                 ready = true;
-                card.ocr = respr3;
-                if (respr3 & (1 << 30)) != 0 {
+                if (card.ocr & ocr_hcs) != 0 {
                     card.card_type = CardType::MmcHc;
                     card.state |= MMC_STATE_HIGHCAPACITY;
                 }
             } else {
                 retry -= 1;
                 // Delay between retries
-                for _ in 0..10000 {
-                    let _ = self.read_reg8(EMMC_POWER_CTRL);
-                }
+                delay_us(1000);
             }
         }
-
+        
         info!("eMMC initialization status: {}", ready);
-
+        
         if !ready {
             return Err(SdError::UnsupportedCard);
         }
-
-        let mut timeout = 100000; 
-        loop {
-            timeout -= 1;
-            if timeout == 0 {
-                break;
-            }
-        }
-
+        
+        delay_us(1000);
+        
         debug!("Clock control before CMD2: 0x{:x}, stable: {}", 
-        self.read_reg16(EMMC_CLOCK_CONTROL),
-        self.is_clock_stable());
+            self.read_reg16(EMMC_CLOCK_CONTROL),
+            self.is_clock_stable());
+        
         Ok(())
     }
 
@@ -437,7 +370,6 @@ impl EMmcHost {
         debug!("eMMC CSD version: {}", csd_version);
         Ok(())
     }
-
 
         // if csd_version <= 2 {            // Standard capacity calculation for older eMMC
         //     let c_size = ((card.csd[2] & 0x3) << 10) | ((card.csd[1] >> 22) & 0x3FF);

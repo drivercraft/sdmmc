@@ -1,20 +1,23 @@
 use log::{debug, info};
 
-use crate::err::SdError;
+use crate::{delay_us, err::SdError};
 
 use super::{constant::*, EMmcHost};
+
+const EMMC_CLOCK: u32 = 375000;
 
 impl EMmcHost {
     // Rockchip EMMC设置时钟函数
     fn rockchip_emmc_set_clock(&mut self, freq: u32) -> Result<(), SdError> {
         // wait for command and data inhibit to be cleared
-        let mut timeout = 200000;
+        let mut timeout = 200;
         while (self.read_reg(EMMC_PRESENT_STATE) & (EMMC_CMD_INHIBIT | EMMC_DATA_INHIBIT)) != 0 {
-            timeout -= 1;
             if timeout == 0 {
                 debug!("Timeout waiting for cmd & data inhibit");
                 return Err(SdError::Timeout);
             }
+            timeout -= 1;
+            delay_us(100);
         }
 
         // first disable the clock
@@ -26,7 +29,7 @@ impl EMmcHost {
         }
 
         // 计算输入时钟
-        let input_clk = self.clock_base;
+        let input_clk = EMMC_CLOCK;
         info!("input_clk: {}", input_clk);
 
         // 根据SDHCI规范版本计算分频器
@@ -81,134 +84,31 @@ impl EMmcHost {
         clk |= EMMC_CLOCK_INT_EN;
 
         self.write_reg16(EMMC_CLOCK_CONTROL, clk);
-        
-        self.enable_card_clock()?;
+
+        self.enable_card_clock(clk)?;
+
+        debug!("EMMC Clock Control: {:#x}", clk);
         
         Ok(())
     }
 
     // DWCMSHC SDHCI EMMC设置时钟
-    fn dwcmshc_sdhci_emmc_set_clock(&mut self, freq: u32) -> Result<(), SdError> {
+    pub fn dwcmshc_sdhci_emmc_set_clock(&mut self, freq: u32) -> Result<(), SdError> {
+
         self.rockchip_emmc_set_clock(freq)?;
 
         info!("Clock {:#x}", self.read_reg16(EMMC_CLOCK_CONTROL));
         
-        // // Disable output clock while config DLL
-        // self.write_reg16(EMMC_CLOCK_CONTROL, 0);
+        // Disable output clock while config DLL
+        self.write_reg16(EMMC_CLOCK_CONTROL, 0);
+
+        info!("Clock {:#x}", self.read_reg16(EMMC_CLOCK_CONTROL));
         
-        // // DLL配置基于频率
-        // if freq >= 100_000_000 { // 100 MHz
-        //     // reset DLL
-        //     self.write_reg(DWCMSHC_EMMC_DLL_CTRL, DWCMSHC_EMMC_DLL_CTRL_RESET);
-        //     // 小延迟
-        //     for _ in 0..1000 {
-        //         let _ = self.read_reg8(EMMC_POWER_CTRL);
-        //     }
-        //     self.write_reg(DWCMSHC_EMMC_DLL_CTRL, 0);
-            
-        //     // 配置 EMMC_ATCTRL 寄存器
-        //     let extra = (0x1 << 16) | (0x2 << 17) | (0x3 << 19); // tune clock stop en, pre-change delay, post-change delay
-        //     self.write_reg(DWCMSHC_EMMC_ATCTRL, extra);
-            
-        //     // 初始化DLL设置
-        //     let extra = (DWCMSHC_EMMC_DLL_START_DEFAULT << DWCMSHC_EMMC_DLL_START_POINT) |
-        //                 (DWCMSHC_EMMC_DLL_INC_VALUE << DWCMSHC_EMMC_DLL_INC) |
-        //                 DWCMSHC_EMMC_DLL_START;
-        //     self.write_reg(DWCMSHC_EMMC_DLL_CTRL, extra);
-            
-        //     // 等待DLL锁定
-        //     let mut timeout = 500;
-        //     let mut dll_lock_value = 0;
-        //     while timeout > 0 {
-        //         let status = self.read_reg(DWCMSHC_EMMC_DLL_STATUS0);
-        //         if dll_lock_wo_tmout(status) {
-        //             dll_lock_value = ((status & 0xFF) * 2) & 0xFF;
-        //             break;
-        //         }
-        //         timeout -= 1;
-        //         if timeout == 0 {
-        //             return Err(SdError::Timeout);
-        //         }
-                
-        //         // 小延迟
-        //         for _ in 0..1000 {
-        //             let _ = self.read_reg8(EMMC_POWER_CTRL);
-        //         }
-        //     }
-            
-        //     // 配置RX时钟
-        //     let mut extra = DWCMSHC_EMMC_DLL_DLYENA | DLL_RXCLK_ORI_GATE;
-            
-        //     // 假设设备数据配置类似于C代码中的RK_RXCLK_NO_INVERTER
-        //     let use_rxclk_no_inverter = true; // 这应该从设备配置中获取
-        //     if use_rxclk_no_inverter {
-        //         extra |= DLL_RXCLK_NO_INVERTER;
-        //     }
-            
-        //     // 假设设备数据配置类似于C代码中的RK_TAP_VALUE_SEL
-        //     let use_tap_value_sel = true; // 这应该从设备配置中获取
-        //     if use_tap_value_sel {
-        //         extra |= DLL_TAP_VALUE_SEL | (dll_lock_value << DLL_TAP_VALUE_OFFSET);
-        //     }
-            
-        //     self.write_reg(DWCMSHC_EMMC_DLL_RXCLK, extra);
-            
-        //     // 设置TX时钟
-        //     // 假设设备数据配置中有hs200_tx_tap和hs400_tx_tap
-        //     let hs200_tx_tap = 16; // 这应该从设备配置中获取
-        //     let hs400_tx_tap = 8;  // 这应该从设备配置中获取
-        //     let mut txclk_tapnum = hs200_tx_tap;
-            
-        //     // 获取当前MMC时序模式
-        //     let timing = MMC_TIMING_MMC_HS200; // 这应该从当前MMC时序状态中获取
-            
-        //     // 假设设备数据配置类似于C代码中的RK_DLL_CMD_OUT
-        //     let use_dll_cmd_out = true; // 这应该从设备配置中获取
-            
-        //     if use_dll_cmd_out && (timing == MMC_TIMING_MMC_HS400 || timing == MMC_TIMING_MMC_HS400ES) {
-        //         txclk_tapnum = hs400_tx_tap;
-                
-        //         // 配置命令输出DLL
-        //         let hs400_cmd_tap = 8; // 这应该从设备配置中获取
-        //         let mut extra = DLL_CMDOUT_SRC_CLK_NEG |
-        //                         DLL_CMDOUT_BOTH_CLK_EDGE |
-        //                         DWCMSHC_EMMC_DLL_DLYENA |
-        //                         hs400_cmd_tap |
-        //                         DLL_CMDOUT_TAPNUM_FROM_SW;
-                                
-        //         if use_tap_value_sel {
-        //             extra |= DLL_TAP_VALUE_SEL | (dll_lock_value << DLL_TAP_VALUE_OFFSET);
-        //         }
-                
-        //         self.write_reg(DECMSHC_EMMC_DLL_CMDOUT, extra);
-        //     }
-            
-        //     // 配置TX时钟DLL
-        //     let mut extra = DWCMSHC_EMMC_DLL_DLYENA |
-        //                     DLL_TXCLK_TAPNUM_FROM_SW |
-        //                     DLL_TXCLK_NO_INVERTER |
-        //                     txclk_tapnum;
-                            
-        //     if use_tap_value_sel {
-        //         extra |= DLL_TAP_VALUE_SEL | (dll_lock_value << DLL_TAP_VALUE_OFFSET);
-        //     }
-            
-        //     self.write_reg(DWCMSHC_EMMC_DLL_TXCLK, extra);
-            
-        //     // 配置STRBIN DLL
-        //     let hs400_strbin_tap = 3; // 这应该从设备配置中获取
-        //     let mut extra = DWCMSHC_EMMC_DLL_DLYENA |
-        //                     hs400_strbin_tap |
-        //                     DLL_STRBIN_TAPNUM_FROM_SW;
-                            
-        //     if use_tap_value_sel {
-        //         extra |= DLL_TAP_VALUE_SEL | (dll_lock_value << DLL_TAP_VALUE_OFFSET);
-        //     }
-            
-        //     self.write_reg(DWCMSHC_EMMC_DLL_STRBIN, extra);
-            
-        // } else {
-            // disable dll
+        // DLL配置基于频率
+        if freq >= 100_000_000 { // 100 MHz
+            // Enable DLL
+        } else {
+            // Disable dll
             self.write_reg(DWCMSHC_EMMC_DLL_CTRL, 0);
             
             // Disable cmd conflict check
@@ -230,30 +130,33 @@ impl EMmcHost {
             let extra = DWCMSHC_EMMC_DLL_DLYENA |
                         DLL_STRBIN_DELAY_NUM_SEL |
                         (ddr50_strbin_delay_num << DLL_STRBIN_DELAY_NUM_OFFSET);
+            info!("extra: {:#b}", extra);
             self.write_reg(DWCMSHC_EMMC_DLL_STRBIN, extra);
-        // }
+        }
 
         // Enable card clock
-        self.enable_card_clock()?;
+        self.enable_card_clock(0)?;
+
+        info!("Clock {:#x}", self.read_reg16(EMMC_CLOCK_CONTROL));
 
         Ok(())
     }
     
-    pub fn enable_card_clock(&mut self) -> Result<(), SdError> {
-        let mut clk = self.read_reg16(EMMC_CLOCK_CONTROL);
+    pub fn enable_card_clock(&mut self, mut clk: u16) -> Result<(), SdError> {
+        
         clk |= EMMC_CLOCK_INT_EN;
         self.write_reg16(EMMC_CLOCK_CONTROL, clk);
 
-        let mut timeout = 100000;
+        let mut timeout = 20;
         while (self.read_reg16(EMMC_CLOCK_CONTROL) & EMMC_CLOCK_INT_STABLE) == 0 {
             timeout -= 1;
+            delay_us(1000);
             if timeout == 0 {
                 info!("Internal clock never stabilised.");
                 return Err(SdError::Timeout);
             }
         }    
 
-        let clk = self.read_reg16(EMMC_CLOCK_CONTROL);
         self.write_reg16(EMMC_CLOCK_CONTROL, clk | EMMC_CLOCK_CARD_EN);
 
         Ok(())
@@ -274,43 +177,9 @@ impl EMmcHost {
         
         self.write_reg(DWCMSHC_EMMC_CONTROL, vendor);
         
-        // 一些eMMC设备在发送命令前需要延迟
-        for _ in 0..100000 {
-            let _ = self.read_reg8(EMMC_POWER_CTRL);
-        }
+        delay_us(100);
         
         Ok(())
-    }
-    
-    // DWCMSHC SDHCI设置IO后处理
-    fn dwcmshc_sdhci_set_ios_post(&mut self) {
-        // 获取当前MMC时序模式
-        let timing = MMC_TIMING_MMC_HS400; // 这应该从当前MMC时序状态中获取
-        
-        if timing == MMC_TIMING_MMC_HS400 || timing == MMC_TIMING_MMC_HS400ES {
-            // 设置主机控制2寄存器
-            let mut ctrl = self.read_reg16(EMMC_HOST_CTRL2);
-            ctrl &= !SDHCI_CTRL_UHS_MASK;
-            ctrl |= DWCMSHC_CTRL_HS400;
-            self.write_reg16(EMMC_HOST_CTRL2, ctrl);
-            
-            // 设置CARD_IS_EMMC位以启用HS400的数据选通
-            let mut ctrl = self.read_reg16(DWCMSHC_EMMC_CONTROL);
-            ctrl |= DWCMSHC_CARD_IS_EMMC as u16;
-            self.write_reg16(DWCMSHC_EMMC_CONTROL, ctrl);
-        }
-    }
-    
-    // Rockchip SDHCI设置时钟
-    pub fn rockchip_sdhci_set_clock(&mut self, freq: u32) -> Result<(), SdError> {
-        self.dwcmshc_sdhci_emmc_set_clock(freq)
-    }
-    
-    // Rockchip SDHCI设置IO后处理
-    pub fn rockchip_sdhci_set_ios_post(&mut self) {
-        // 根据设备类型选择适当的IO后处理函数
-        // 这里假设我们使用DWCMSHC控制器
-        self.dwcmshc_sdhci_set_ios_post();
     }
     
     // Rockchip SDHCI设置增强选通
@@ -325,10 +194,42 @@ impl EMmcHost {
         // 检查内部时钟稳定位(通常是bit 1)
         return (clock_ctrl & 0x0002) != 0;
     }
+
+    pub fn sdhci_set_power(&mut self, power: u32) -> Result<(), SdError> {
+        let mut pwr= 0;
+    
+        if power != 0xFFFF {  // Equivalent to (unsigned short)-1 in C
+            match 1 << power {
+                MMC_VDD_165_195 => {
+                    pwr = EMMC_POWER_180;
+                },
+                MMC_VDD_29_30 | MMC_VDD_30_31 => {
+                    pwr = EMMC_POWER_300;
+                },
+                MMC_VDD_32_33 | MMC_VDD_33_34 => {
+                    pwr = EMMC_POWER_330;
+                },
+                _ => {}
+            }
+        }
+    
+        if pwr == 0 {
+            self.write_reg8(EMMC_POWER_CTRL, 0);
+            return Ok(());
+        }
+    
+        pwr |= EMMC_POWER_ON;
+        self.write_reg8(EMMC_POWER_CTRL, pwr);
+
+        info!("EMMC Power Control: {:#x}", pwr);
+
+        // Small delay for power to stabilize
+        delay_us(1000);
+
+        Ok(())
+    }
 }
 
 const EMMC_PROG_CLOCK_MODE: u16 = 0x0020;
 const EMMC_DIVIDER_SHIFT: u16 = 8;
 const EMMC_DIVIDER_HI_SHIFT: u16 = 6;
-
-const SDHCI_CTRL_UHS_MASK: u16 = 0x0007;

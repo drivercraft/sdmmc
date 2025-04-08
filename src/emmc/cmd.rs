@@ -140,9 +140,9 @@ impl EMmcHost {
 
         // Use longer timeout for initialization commands
         let timeout_val = if cmd.opcode == MMC_GO_IDLE_STATE || cmd.opcode == MMC_SEND_OP_COND {
-            5000000 // Longer timeout for initialization commands
+            500000 // Longer timeout for initialization commands
         } else {
-            1000000 // Standard timeout
+            100000 // Standard timeout
         };
 
         // Wait for command completion using polling
@@ -197,28 +197,28 @@ impl EMmcHost {
                         self.read_reg16(EMMC_ERROR_INT_STAT)
                     );
 
-                    // Map specific error types
-                    let err = if err_status & 0x1 != 0 {
-                        SdError::Timeout
-                    } else if err_status & 0x2 != 0 {
-                        SdError::Crc
-                    } else if err_status & 0x4 != 0 {
-                        SdError::EndBit
-                    } else if err_status & 0x8 != 0 {
-                        SdError::Index
-                    } else if err_status & 0x10 != 0 {
-                        SdError::DataTimeout
-                    } else if err_status & 0x20 != 0 {
-                        SdError::DataCrc
-                    } else if err_status & 0x40 != 0 {
-                        SdError::DataEndBit
-                    } else if err_status & 0x80 != 0 {
-                        SdError::CurrentLimit
-                    } else {
-                        SdError::CommandError
-                    };
+                    // // Map specific error types
+                    // let err = if err_status & 0x1 != 0 {
+                    //     SdError::Timeout
+                    // } else if err_status & 0x2 != 0 {
+                    //     SdError::Crc
+                    // } else if err_status & 0x4 != 0 {
+                    //     SdError::EndBit
+                    // } else if err_status & 0x8 != 0 {
+                    //     SdError::Index
+                    // } else if err_status & 0x10 != 0 {
+                    //     SdError::DataTimeout
+                    // } else if err_status & 0x20 != 0 {
+                    //     SdError::DataCrc
+                    // } else if err_status & 0x40 != 0 {
+                    //     SdError::DataEndBit
+                    // } else if err_status & 0x80 != 0 {
+                    //     SdError::CurrentLimit
+                    // } else {
+                    //     SdError::CommandError
+                    // };
 
-                    return Err(err);
+                    // return Err(err);
                 }
 
                 break;
@@ -235,7 +235,7 @@ impl EMmcHost {
 
         // If data is present, wait for data completion
         if cmd.data_present {
-            timeout = 1000000;
+            timeout = 100000;
             while timeout > 0 {
                 let status = self.read_reg16(EMMC_NORMAL_INT_STAT);
 
