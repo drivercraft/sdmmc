@@ -197,28 +197,28 @@ impl EMmcHost {
                         self.read_reg16(EMMC_ERROR_INT_STAT)
                     );
 
-                    // // Map specific error types
-                    // let err = if err_status & 0x1 != 0 {
-                    //     SdError::Timeout
-                    // } else if err_status & 0x2 != 0 {
-                    //     SdError::Crc
-                    // } else if err_status & 0x4 != 0 {
-                    //     SdError::EndBit
-                    // } else if err_status & 0x8 != 0 {
-                    //     SdError::Index
-                    // } else if err_status & 0x10 != 0 {
-                    //     SdError::DataTimeout
-                    // } else if err_status & 0x20 != 0 {
-                    //     SdError::DataCrc
-                    // } else if err_status & 0x40 != 0 {
-                    //     SdError::DataEndBit
-                    // } else if err_status & 0x80 != 0 {
-                    //     SdError::CurrentLimit
-                    // } else {
-                    //     SdError::CommandError
-                    // };
+                    // Map specific error types
+                    let err = if err_status & 0x1 != 0 {
+                        SdError::Timeout
+                    } else if err_status & 0x2 != 0 {
+                        SdError::Crc
+                    } else if err_status & 0x4 != 0 {
+                        SdError::EndBit
+                    } else if err_status & 0x8 != 0 {
+                        SdError::Index
+                    } else if err_status & 0x10 != 0 {
+                        SdError::DataTimeout
+                    } else if err_status & 0x20 != 0 {
+                        SdError::DataCrc
+                    } else if err_status & 0x40 != 0 {
+                        SdError::DataEndBit
+                    } else if err_status & 0x80 != 0 {
+                        SdError::CurrentLimit
+                    } else {
+                        SdError::CommandError
+                    };
 
-                    // return Err(err);
+                    return Err(err);
                 }
 
                 break;
