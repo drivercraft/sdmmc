@@ -4,6 +4,9 @@
 
 use core::sync::atomic::{fence, Ordering};
 
+use bare_test::{print, println};
+use log::debug;
+
 pub mod sdhci;
 pub mod emmc;
 mod err;
@@ -50,4 +53,23 @@ pub fn generic_fls(x: u32) -> u32 {
     }
     
     r
+}
+
+pub unsafe fn dump_memory_region(addr: usize, size: usize) {
+    let start_ptr = addr as *const u32;
+    let word_count = size / 4; // 每个u32是4字节
+    
+    println!("Memory dump from 0x{:08x} to 0x{:08x}:", addr, addr + size - 1);
+    
+    for i in 0..word_count {
+        if i % 4 == 0 {
+            print!("\n0x{:08x}:", addr + i * 4);
+        }
+        
+        // 在unsafe块中读取内存
+        let value = unsafe { *start_ptr.add(i) };
+        print!(" 0x{:08x}", value);
+    }
+
+    println!("");
 }
