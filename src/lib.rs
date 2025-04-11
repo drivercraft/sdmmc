@@ -5,7 +5,6 @@
 use core::sync::atomic::{fence, Ordering};
 
 use bare_test::{print, println};
-use log::debug;
 
 pub mod sdhci;
 pub mod emmc;

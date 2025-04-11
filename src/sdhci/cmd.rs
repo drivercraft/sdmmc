@@ -1,4 +1,4 @@
-use log::{debug, info};
+use log::{debug, info, warn};
 
 use crate::err::SdError;
 
@@ -168,6 +168,7 @@ impl SdHost {
                     SdError::CommandError
                 };
 
+
                 return Err(err);
             }
 
@@ -203,6 +204,7 @@ impl SdHost {
             }
 
             if timeout == 0 {
+                warn!(" Command timeout ");
                 return Err(SdError::DataTimeout);
             }
         }
