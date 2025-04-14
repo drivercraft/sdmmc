@@ -2,20 +2,18 @@
 #![no_main]
 #![feature(alloc_error_handler)]
 
-use core::sync::atomic::{fence, Ordering};
-
-use bare_test::{print, println};
-use log::debug;
+use bare_test::{print, println, time::since_boot};
 
 pub mod sdhci;
 pub mod emmc;
 mod err;
 
-/// 微秒延时函数
-fn delay_us(us: u32) {
-    for _ in 0..us * 10 {
-        // 防止编译器优化掉的内存屏障
-        fence(Ordering::SeqCst);
+pub fn delay_us(us: u64) {
+    let start = since_boot();
+    let duration = core::time::Duration::from_micros(us);
+    
+    while since_boot() - start < duration {
+        core::hint::spin_loop();
     }
 }
 
@@ -70,6 +68,5 @@ pub unsafe fn dump_memory_region(addr: usize, size: usize) {
         let value = unsafe { *start_ptr.add(i) };
         print!(" 0x{:08x}", value);
     }
-
     println!("");
 }

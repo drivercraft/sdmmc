@@ -133,7 +133,7 @@ impl EMmcHost {
             command |= EMMC_CMD_DATA;
         }
 
-        info!("Sending command: {:#018b}", command);
+        info!("Sending command: {:#x}", command);
 
         // Send the command
         self.write_reg16(EMMC_COMMAND, command);

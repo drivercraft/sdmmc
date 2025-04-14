@@ -34,21 +34,24 @@ mod tests {
     }
 
     fn test_uboot(fdt: &fdt_parser::Fdt) {
-        let emmc = fdt
-            .find_compatible(&["rockchip,dwcmshc-sdhci"])
-            .next()
-            .unwrap();
+        let emmc = fdt.find_compatible(&["rockchip,dwcmshc-sdhci"]).next().unwrap();
+        let clock = fdt.find_compatible(&["rockchip,rk3568-cru"]).next().unwrap();
+        
+        info!("EMMC: {} Clock: {}", emmc.name, clock.name);
+        
+        let emmc_reg = emmc.reg().unwrap().next().unwrap();
+        let clk_reg = clock.reg().unwrap().next().unwrap();
+        
+        println!("EMMC reg {:#x}, {:#x}", emmc_reg.address, emmc_reg.size.unwrap());
+        println!("Clock reg {:#x}, {:#x}", clk_reg.address, clk_reg.size.unwrap());
+        
+        let emmc_addr_ptr = iomap((emmc_reg.address as usize).into(), emmc_reg.size.unwrap());
+        let clk_add_ptr = iomap((clk_reg.address as usize).into(), clk_reg.size.unwrap());
+        
+        let emmc_addr = emmc_addr_ptr.as_ptr() as usize;
+        let clk_addr = clk_add_ptr.as_ptr() as usize;
 
-        info!("EMMC: {}", emmc.name);
-    
-        let reg = emmc.reg().unwrap().next().unwrap();
-        println!("EMMC reg {:#x}, {:#x}", reg.address, reg.size.unwrap());
-    
-        let addr_ptr = iomap((reg.address as usize).into(), reg.size.unwrap());
-    
-        let addr = addr_ptr.as_ptr() as usize;
-
-        test_emmc(addr);
+        test_emmc(emmc_addr, clk_addr);
 
         info!("test uboot");
     }
@@ -163,9 +166,9 @@ mod tests {
         println!("SD card test complete");
     }
 
-    fn test_emmc(addr: usize) {
+    fn test_emmc(emmc_addr: usize, clock: usize) {
         // Initialize custom SDHCI controller
-        let mut sdhci = EMmcHost::new(addr);
+        let mut sdhci = EMmcHost::new(emmc_addr);
 
         // Try to initialize the SD card
         match sdhci.init() {

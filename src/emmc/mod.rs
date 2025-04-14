@@ -1,6 +1,7 @@
 extern crate alloc;
 
 mod cmd;
+mod clock;
 mod block;
 mod config;
 mod constant;
@@ -91,8 +92,8 @@ impl EMmcHost {
 
     // Initialize the host controller
     pub fn init(&mut self) -> Result<(), SdError> {
-
-        // info!("Init EMMC Controller");
+        // 对于时钟，查看是否需要初始化
+        info!("Init EMMC Controller");
 
         // let is_card_inserted = self.is_card_present();
         // debug!("Card inserted: {}", is_card_inserted);
@@ -160,12 +161,16 @@ impl EMmcHost {
 
         // info!("EMMC Host Control 1: {:#x}", ctrl & !EMMC_CTRL_4BITBUS & !EMMC_CTRL_8BITBUS);
 
-        // self.write_reg8(EMMC_HOST_CTRL1, ctrl & !EMMC_CTRL_4BITBUS & !EMMC_CTRL_8BITBUS);
+        self.write_reg8(EMMC_HOST_CTRL1, ctrl & !EMMC_CTRL_4BITBUS & !EMMC_CTRL_8BITBUS);
 
-        // debug!("EMMC Host Control 1 after reset: {:#x}", self.read_reg8(EMMC_HOST_CTRL2));
+        // Set initial clock and wait for it to stabilize
+        self.dwcmshc_sdhci_emmc_set_clock(375000)?; // Start with 400 KHz for initialization
 
-        // // Set initial clock and wait for it to stabilize
-        // self.dwcmshc_sdhci_emmc_set_clock(400000)?; // Start with 400 KHz for initialization
+        self.write_reg16(EMMC_HOST_CTRL2, 0);
+
+        // let addr = 0xfffff000fe310000;
+        // let size = 0x1000;
+        // unsafe { dump_memory_region(addr, size) };
 
         // // Check if card is present
         // if !self.is_card_present() {
@@ -250,28 +255,48 @@ impl EMmcHost {
         info!("eMMC initialization started");
         // For eMMC, we use CMD1 instead of ACMD41
         // HCS=1, voltage window for eMMC as per specs
-        let ocr = 0x000000;
+        let ocr = 0x00; // 2.7V to 3.6V
         let retry = 100;
 
-        // Create card structure
-        let mut card = EMmcCard::init(self.base_addr, CardType::Mmc);
+        // // Create card structure
+        // let mut card = EMmcCard::init(self.base_addr, CardType::Mmc);
 
-        // Send CMD0 to reset the card
         self.mmc_go_idle()?;
 
-        // Send CMD1 to set OCR and check if card is ready
-        self.mmc_send_op_cond(&mut card, ocr, retry)?;
+        delay_us(1000000);
 
-        delay_us(10000); // 10ms延迟
+        let mut cmd = EMmcCommand::new(MMC_SEND_OP_COND, ocr, MMC_RSP_R3);
+        self.send_command(&cmd)?;
+        
+        delay_us(1000000);
 
-        // Send CMD2 to get CID
-        self.mmc_all_send_cid(&mut card)?;
+        debug!("{:x}", self.get_response().as_r3());
 
-        // Send CMD3 to get RCA
-        self.mmc_set_relative_addr(&mut card)?;
+        self.mmc_go_idle()?;
 
-        // Send CMD9 to get CSD
-        self.mmc_send_csd(&mut card)?;
+        delay_us(1000000);
+
+        cmd = EMmcCommand::new(MMC_SEND_OP_COND, ocr, MMC_RSP_R3);
+        self.send_command(&cmd)?;
+        
+        delay_us(1000000);
+
+        debug!("{:x}", self.get_response().as_r3());
+
+        // // Send CMD0 to reset the card
+        // self.mmc_go_idle()?;
+
+        // // Send CMD1 to set OCR and check if card is ready
+        // self.mmc_send_op_cond(&mut card, ocr, retry)?;
+
+        // // Send CMD2 to get CID
+        // self.mmc_all_send_cid(&mut card)?;
+
+        // // Send CMD3 to get RCA
+        // self.mmc_set_relative_addr(&mut card)?;
+
+        // // Send CMD9 to get CSD
+        // self.mmc_send_csd(&mut card)?;
 
         Ok(())
     }
@@ -279,12 +304,12 @@ impl EMmcHost {
     // Send CMD0 to reset the card
     fn mmc_go_idle(&self)  -> Result<(), SdError>{
 
-        delay_us(1000);
+        delay_us(100000);
 
         let cmd = EMmcCommand::new(MMC_GO_IDLE_STATE, 0, MMC_RSP_NONE);
         self.send_command(&cmd)?;
 
-        delay_us(2000);
+        delay_us(200000);
 
         info!("eMMC reset complete");
         Ok(())
@@ -295,14 +320,16 @@ impl EMmcHost {
         // Go idle first
         self.mmc_go_idle()?;
 
-        delay_us(10000);
-
-        info!("Before CMD1, Clock Stable: {}, Power: {:#x}", 
-            self.is_clock_stable(), self.read_reg8(EMMC_POWER_CTRL));
+        delay_us(1000000);
+        
+        info!("mmc_send_op_cond: Power Status {:b}", self.read_reg8(EMMC_POWER_CTRL));
         
         // First iteration - send without args to query capabilities
-        let mut cmd = EMmcCommand::new(MMC_SEND_OP_COND, 0, MMC_RSP_R3);
+        let mut cmd = EMmcCommand::new(MMC_SEND_OP_COND, ocr, MMC_RSP_R3);
         self.send_command(&cmd)?;
+        
+        delay_us(1000000);
+
         card.ocr = self.get_response().as_r3();
 
         info!("CMD1 sent, Present State: {:#x}", self.read_reg(EMMC_PRESENT_STATE));

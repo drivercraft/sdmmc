@@ -29,7 +29,7 @@ impl EMmcHost {
         }
 
         // 计算输入时钟
-        let input_clk = EMMC_CLOCK;
+        let input_clk = 200_000_000;
         info!("input_clk: {}", input_clk);
 
         // 根据SDHCI规范版本计算分频器
@@ -77,11 +77,16 @@ impl EMmcHost {
             div = i >> 1;
         }
 
-        info!("EMMC Clock Divisor: {}", div);
+        info!("EMMC Clock Divisor: {:x}", div);
 
         clk |= ((div as u16) & 0xFF) << EMMC_DIVIDER_SHIFT;
+
+        //  0000 0000 0000 0000
+        //  
+
         clk |= (((div as u16) & 0x300) >> 8) << EMMC_DIVIDER_HI_SHIFT;
-        clk |= EMMC_CLOCK_INT_EN;
+
+        info!("EMMC Clock Control: {:#x}", clk);
 
         self.write_reg16(EMMC_CLOCK_CONTROL, clk);
 
@@ -133,6 +138,8 @@ impl EMmcHost {
             info!("extra: {:#b}", extra);
             self.write_reg(DWCMSHC_EMMC_DLL_STRBIN, extra);
         }
+
+        self.rockchip_emmc_set_clock(freq)?;
 
         // Enable card clock
         self.enable_card_clock(0)?;
