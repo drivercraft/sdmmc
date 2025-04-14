@@ -162,6 +162,16 @@ mod tests {
             }
         }
 
+        // Read a block from the SD card
+        match sdhci.read_signal_block() {
+            Ok(_) => {
+                println!("Block read from SD card");
+            },
+            Err(e) => {
+                warn!("Failed to read block from SD card: {:?}", e);
+            }
+        }
+
         // Test complete
         println!("SD card test complete");
     }

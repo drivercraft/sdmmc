@@ -26,7 +26,7 @@ pub enum CardType {
 #[derive(Debug)]
 pub struct SdHost {
     base_addr: usize,
-    card: Option<SdCard>,
+    pub card: Option<SdCard>,
     caps: u32,
     max_current: u32,
     clock_base: u32,
@@ -117,29 +117,19 @@ impl SdHost {
         // Set initial clock and power
         self.set_clock(400000)?; // Start with 400 KHz for initialization
 
-        info!("checkpoint 01");
-
         self.set_power(1)?; // Enable power to the card
-
-        info!("checkpoint 02");
 
         // Set initial bus width to 1-bit
         let ctrl = self.read_reg8(SDHCI_HOST_CONTROL);
         self.write_reg8(SDHCI_HOST_CONTROL, ctrl & !SDHCI_CTRL_4BITBUS);
-
-        info!("checkpoint 03");
 
         // Check if card is present
         if !self.is_card_present() {
             return Err(SdError::NoCard);
         }
 
-        info!("checkpoint 04");
-
         // Initialize the card
         self.init_card()?;
-        
-        info!("checkpoint 05");
 
         Ok(())
     }
@@ -522,6 +512,20 @@ impl SdHost {
         }
 
         Ok(card.capacity_blocks * 512)
+    }
+
+    // Read a block from the card
+    pub fn read_signal_block(&self) -> Result<(), SdError> {
+        let addr: u32 = 0x4010000;
+        let mut buf = [0u8; 512];
+        return self.read_block(addr, &mut buf);
+    }
+
+    // Write a block to the card
+    pub fn write_signal_block(&self) -> Result<(), SdError> {
+        let addr = 0x40100000;
+        let mut buf = [1u8; 512];
+        return self.write_block(addr, &mut buf);
     }
 }
 
