@@ -42,7 +42,10 @@ pub struct RK3568Cru {
     mode_con00: u32,            // 模式控制寄存器
     misc_con: [u32; 3],         // 杂项控制寄存器
     glb_cnt_th: u32,            // 全局计数阈值
-    glb_rst_regs: [u32; 3],     // 全局复位寄存器组
+    glb_srst_fst: u32,          // 全局软复位
+    glb_srsr_snd: u32,          // 全局软复位
+    glb_rst_con: u32,           // 全局软复位阈值
+    glb_rst_st: u32,            // 全局软复位状态
     reserved0: [u32; 7],        // 保留
     clksel_con: [u32; 85],      // 时钟选择寄存器
     reserved1: [u32; 43],       // 保留
@@ -59,7 +62,7 @@ pub struct RK3568Cru {
 }
 
 /// RK3568 时钟驱动
-pub struct RK3568ClkPriv {
+pub struct RK3568ClkPri {
     cru: *mut RK3568Cru,
 }
 
@@ -72,7 +75,7 @@ impl fmt::Display for RK3568Error {
     }
 }
 
-impl RK3568ClkPriv {
+impl RK3568ClkPri {
     pub unsafe fn new(cru_ptr: *mut RK3568Cru) -> Self {
         // cru的基地址
         Self {
@@ -130,12 +133,15 @@ impl RK3568ClkPriv {
     }
 
     /// 获取当前 eMMC 总线时钟频率
+    /// 未使用
     pub fn emmc_get_bclk(&self) -> Result<u64, RK3568Error> {
         // 安全地读取寄存器
         let con = unsafe { read_volatile(&(*self.cru).clksel_con[28]) };
         
         // 提取时钟选择位
         let sel = (con & BCLK_EMMC_SEL_MASK) >> BCLK_EMMC_SEL_SHIFT;
+
+        debug!("emmc_get_bclk con = {:#x} sel = {}", con, sel);
         
         // 根据选择返回对应频率
         match sel {
@@ -147,6 +153,7 @@ impl RK3568ClkPriv {
     }
     
     /// 设置 eMMC 总线时钟频率
+    /// 未使用
     pub fn emmc_set_bclk(&mut self, rate: u64) -> Result<u64, RK3568Error> {
         // 根据请求的频率选择对应的时钟源
         let src_clk = match rate {
@@ -178,131 +185,125 @@ impl RK3568ClkPriv {
     }
 }
 
-/// MMC相关常量及实现
-pub mod mmc {
-    use super::*;
-    
-    /// 相位调整相关常量
-    const ROCKCHIP_MMC_DELAY_SEL: u32 = 0x1;
-    const ROCKCHIP_MMC_DEGREE_MASK: u32 = 0x3;
-    const ROCKCHIP_MMC_DELAYNUM_OFFSET: u32 = 2;
-    const ROCKCHIP_MMC_DELAYNUM_MASK: u32 = 0xff << ROCKCHIP_MMC_DELAYNUM_OFFSET;
-    const ROCKCHIP_MMC_DELAY_ELEMENT_PSEC: u32 = 100;
+/// 相位调整相关常量
+const ROCKCHIP_MMC_DELAY_SEL: u32 = 0x1;
+const ROCKCHIP_MMC_DEGREE_MASK: u32 = 0x3;
+const ROCKCHIP_MMC_DELAYNUM_OFFSET: u32 = 2;
+const ROCKCHIP_MMC_DELAYNUM_MASK: u32 = 0xff << ROCKCHIP_MMC_DELAYNUM_OFFSET;
+const ROCKCHIP_MMC_DELAY_ELEMENT_PSEC: u32 = 100;
 
-    /// MMC采样相位时钟ID
-    #[derive(Debug, Clone, Copy)]
-    pub enum RK3568MmcClockId {
-        SclkEmmcSample,
-        SclkSdmmc0Sample,
-        SclkSdmmc1Sample,
-        SclkSdmmc2Sample,
-    }
+/// MMC采样相位时钟ID
+#[derive(Debug, Clone, Copy)]
+pub enum RK3568MmcClockId {
+    SclkEmmcSample,
+    SclkSdmmc0Sample,
+    SclkSdmmc1Sample,
+    SclkSdmmc2Sample,
+}
 
-    /// 时钟结构
-    pub struct Clock {
-        pub id: RK3568MmcClockId,
-        pub rate: u64,
-    }
+/// 时钟结构
+pub struct Clock {
+    pub id: RK3568MmcClockId,
+    pub rate: u64,
+}
 
-    impl RK3568ClkPriv {
-        /// 获取MMC时钟相位(以度为单位)
-        pub fn mmc_get_phase(&self, clk: &Clock) -> Result<u16, RK3568Error> {
-            // 获取时钟频率
-            let rate = clk.rate;
-            if rate == 0 {
-                return Err(RK3568Error::InvalidClockRate);
-            }
-            
-            // 根据时钟ID读取相应的控制寄存器
-            let raw_value = unsafe {
-                match clk.id {
-                    RK3568MmcClockId::SclkEmmcSample => 
-                        read_volatile(&(*self.cru).emmc_con[1]),
-                    RK3568MmcClockId::SclkSdmmc0Sample => 
-                        read_volatile(&(*self.cru).sdmmc0_con[1]),
-                    RK3568MmcClockId::SclkSdmmc1Sample => 
-                        read_volatile(&(*self.cru).sdmmc1_con[1]),
-                    RK3568MmcClockId::SclkSdmmc2Sample => 
-                        read_volatile(&(*self.cru).sdmmc2_con[1]),
-                }
-            };
-            
-            let raw_value = raw_value >> 1;
-            
-            // 计算粗调相位(90度增量)
-            let mut degrees = (raw_value & ROCKCHIP_MMC_DEGREE_MASK) * 90;
-            
-            // 检查是否启用了细调
-            if (raw_value & ROCKCHIP_MMC_DELAY_SEL) != 0 {
-                // 计算延迟元素带来的额外度数
-                let factor = (ROCKCHIP_MMC_DELAY_ELEMENT_PSEC / 10) as u64 *
-                              36 * (rate / 1_000_000);
-                
-                let delay_num = (raw_value & ROCKCHIP_MMC_DELAYNUM_MASK) >> ROCKCHIP_MMC_DELAYNUM_OFFSET;
-                
-                // 添加细调相位
-                degrees += div_round_closest((delay_num as u64 * factor) as u32, 10000);
-            }
-            
-            // 返回总相位(限制在0-359度)
-            Ok(degrees as u16 % 360)
+impl RK3568ClkPri {
+    /// 获取MMC时钟相位(以度为单位)
+    pub fn mmc_get_phase(&self, clk: &Clock) -> Result<u16, RK3568Error> {
+        // 获取时钟频率
+        let rate = clk.rate;
+        if rate == 0 {
+            return Err(RK3568Error::InvalidClockRate);
         }
         
-        /// 设置MMC时钟相位
-        pub fn mmc_set_phase(&mut self, clk: &Clock, degrees: u32) -> Result<(), RK3568Error> {
-            let rate = clk.rate;
-            if rate == 0 {
-                return Err(RK3568Error::InvalidClockRate);
+        // 根据时钟ID读取相应的控制寄存器
+        let raw_value = unsafe {
+            match clk.id {
+                RK3568MmcClockId::SclkEmmcSample => 
+                    read_volatile(&(*self.cru).emmc_con[1]),
+                RK3568MmcClockId::SclkSdmmc0Sample => 
+                    read_volatile(&(*self.cru).sdmmc0_con[1]),
+                RK3568MmcClockId::SclkSdmmc1Sample => 
+                    read_volatile(&(*self.cru).sdmmc1_con[1]),
+                RK3568MmcClockId::SclkSdmmc2Sample => 
+                    read_volatile(&(*self.cru).sdmmc2_con[1]),
             }
+        };
+        
+        let raw_value = raw_value >> 1;
+        
+        // 计算粗调相位(90度增量)
+        let mut degrees = (raw_value & ROCKCHIP_MMC_DEGREE_MASK) * 90;
+        
+        // 检查是否启用了细调
+        if (raw_value & ROCKCHIP_MMC_DELAY_SEL) != 0 {
+            // 计算延迟元素带来的额外度数
+            let factor = (ROCKCHIP_MMC_DELAY_ELEMENT_PSEC / 10) as u64 *
+                            36 * (rate / 1_000_000);
             
-            // 将请求的相位分解为90度步进和余数
-            let nineties = degrees / 90;
-            let remainder = degrees % 90;
+            let delay_num = (raw_value & ROCKCHIP_MMC_DELAYNUM_MASK) >> ROCKCHIP_MMC_DELAYNUM_OFFSET;
             
-            // 将余数转换为延迟元素数量
-            let mut delay = 10_000_000; // PSECS_PER_SEC / 10000 / 10
-            delay *= remainder;
-            delay = div_round_closest(
-                delay,
-                (rate / 1000) * 36 * (ROCKCHIP_MMC_DELAY_ELEMENT_PSEC / 10) as u64
-            ) as u32;
-            
-            // 限制延迟元素数量到最大允许值
-            let delay_num = core::cmp::min(delay, 255) as u8;
-            
-            // 构建寄存器值
-            let mut raw_value = if delay_num > 0 { ROCKCHIP_MMC_DELAY_SEL } else { 0 };
-            raw_value |= (delay_num as u32) << ROCKCHIP_MMC_DELAYNUM_OFFSET;
-            raw_value |= nineties;
-            
-            // 左移1位，以匹配寄存器布局
-            raw_value <<= 1;
-            
-            // 向寄存器写入新值 (0xffff0000用于保留高16位)
-            unsafe {
-                let addr = match clk.id {
-                    RK3568MmcClockId::SclkEmmcSample => 
-                        &mut (*self.cru).emmc_con[1],
-                    RK3568MmcClockId::SclkSdmmc0Sample => 
-                        &mut (*self.cru).sdmmc0_con[1],
-                    RK3568MmcClockId::SclkSdmmc1Sample => 
-                        &mut (*self.cru).sdmmc1_con[1],
-                    RK3568MmcClockId::SclkSdmmc2Sample => 
-                        &mut (*self.cru).sdmmc2_con[1],
-                };
-                write_volatile(addr, raw_value | 0xffff0000);
-            }
-            
-            
-            if let Ok(actual_degrees) = self.mmc_get_phase(clk) {
-                debug!(
-                    "mmc set_phase({}) delay_nums={} reg={:#x} actual_degrees={}", 
-                    degrees, delay_num, raw_value, actual_degrees
-                );
-            }
-            
-            Ok(())
+            // 添加细调相位
+            degrees += div_round_closest((delay_num as u64 * factor) as u32, 10000);
         }
+        
+        // 返回总相位(限制在0-359度)
+        Ok(degrees as u16 % 360)
+    }
+    
+    /// 设置MMC时钟相位
+    pub fn mmc_set_phase(&mut self, clk: &Clock, degrees: u32) -> Result<(), RK3568Error> {
+        let rate = clk.rate;
+        if rate == 0 {
+            return Err(RK3568Error::InvalidClockRate);
+        }
+        
+        // 将请求的相位分解为90度步进和余数
+        let nineties = degrees / 90;
+        let remainder = degrees % 90;
+        
+        // 将余数转换为延迟元素数量
+        let mut delay = 10_000_000; // PSECS_PER_SEC / 10000 / 10
+        delay *= remainder;
+        delay = div_round_closest(
+            delay,
+            (rate / 1000) * 36 * (ROCKCHIP_MMC_DELAY_ELEMENT_PSEC / 10) as u64
+        ) as u32;
+        
+        // 限制延迟元素数量到最大允许值
+        let delay_num = core::cmp::min(delay, 255) as u8;
+        
+        // 构建寄存器值
+        let mut raw_value = if delay_num > 0 { ROCKCHIP_MMC_DELAY_SEL } else { 0 };
+        raw_value |= (delay_num as u32) << ROCKCHIP_MMC_DELAYNUM_OFFSET;
+        raw_value |= nineties;
+        
+        // 左移1位，以匹配寄存器布局
+        raw_value <<= 1;
+        
+        // 向寄存器写入新值 (0xffff0000用于保留高16位)
+        unsafe {
+            let addr = match clk.id {
+                RK3568MmcClockId::SclkEmmcSample => 
+                    &mut (*self.cru).emmc_con[1],
+                RK3568MmcClockId::SclkSdmmc0Sample => 
+                    &mut (*self.cru).sdmmc0_con[1],
+                RK3568MmcClockId::SclkSdmmc1Sample => 
+                    &mut (*self.cru).sdmmc1_con[1],
+                RK3568MmcClockId::SclkSdmmc2Sample => 
+                    &mut (*self.cru).sdmmc2_con[1],
+            };
+            write_volatile(addr, raw_value | 0xffff0000);
+        }
+        
+        if let Ok(actual_degrees) = self.mmc_get_phase(clk) {
+            debug!(
+                "mmc set_phase({}) delay_nums={} reg={:#x} actual_degrees={}", 
+                degrees, delay_num, raw_value, actual_degrees
+            );
+        }
+        
+        Ok(())
     }
 }
 

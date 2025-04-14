@@ -1,14 +1,16 @@
 extern crate alloc;
 
 mod cmd;
-mod clock;
 mod block;
 mod config;
 mod constant;
 mod rockchip;
 
+pub mod clock;
+
 use core::{fmt::Display, sync::atomic::Ordering};
 use block::EMmcCard;
+use clock::RK3568ClkPri;
 use constant::*;
 use cmd::*;
 use crate::{delay_us, dump_memory_region, err::*, generic_fls};
@@ -91,80 +93,85 @@ impl EMmcHost {
     }
 
     // Initialize the host controller
-    pub fn init(&mut self) -> Result<(), SdError> {
+    pub fn init(&mut self, clk: &mut RK3568ClkPri) -> Result<(), SdError> {
         // 对于时钟，查看是否需要初始化
+        debug!("emmc_get_clk: {}", clk.emmc_get_clk().unwrap());
+
+        let _ = clk.emmc_set_clk(200_000_000);
+
         info!("Init EMMC Controller");
 
-        // let is_card_inserted = self.is_card_present();
-        // debug!("Card inserted: {}", is_card_inserted);
+        let is_card_inserted = self.is_card_present();
+        debug!("Card inserted: {}", is_card_inserted);
 
-        // let version = self.read_reg16(EMMC_HOST_CNTRL_VER);
-        // // version = 4.2
-        // info!("EMMC Version: 0x{:x}", version);
+        let version = self.read_reg16(EMMC_HOST_CNTRL_VER);
+        // version = 4.2
+        info!("EMMC Version: 0x{:x}", version);
 
-        // let caps1 = self.read_reg(EMMC_CAPABILITIES1);
-        // info!("EMMC Capabilities 1: 0b{:b}", caps1);
+        let caps1 = self.read_reg(EMMC_CAPABILITIES1);
+        info!("EMMC Capabilities 1: 0b{:b}", caps1);
 
-        // let mut clk_mul: u32 = 0;
+        let mut clk_mul: u32 = 0;
 
-        // if (version & EMMC_SPEC_VER_MASK) >= EMMC_SPEC_300 {
-        //     let caps2 = self.read_reg(EMMC_CAPABILITIES2);
-        //     info!("EMMC Capabilities 2: 0b{:b}", caps2);
-        //     clk_mul = (caps2 & EMMC_CLOCK_MUL_MASK) >> EMMC_CLOCK_MUL_SHIFT;
-        // }
+        if (version & EMMC_SPEC_VER_MASK) >= EMMC_SPEC_300 {
+            let caps2 = self.read_reg(EMMC_CAPABILITIES2);
+            info!("EMMC Capabilities 2: 0b{:b}", caps2);
+            clk_mul = (caps2 & EMMC_CLOCK_MUL_MASK) >> EMMC_CLOCK_MUL_SHIFT;
+        }
 
-        // if self.clock_base == 0 {
-        //     if (version & EMMC_SPEC_VER_MASK) >= EMMC_SPEC_300 {
-        //         self.clock_base = (caps1 & EMMC_CLOCK_V3_BASE_MASK) >> EMMC_CLOCK_BASE_SHIFT
-        //     } else {
-        //         self.clock_base = (caps1 & EMMC_CLOCK_BASE_MASK) >> EMMC_CLOCK_BASE_SHIFT
-        //     }
+        if self.clock_base == 0 {
+            if (version & EMMC_SPEC_VER_MASK) >= EMMC_SPEC_300 {
+                self.clock_base = (caps1 & EMMC_CLOCK_V3_BASE_MASK) >> EMMC_CLOCK_BASE_SHIFT
+            } else {
+                self.clock_base = (caps1 & EMMC_CLOCK_BASE_MASK) >> EMMC_CLOCK_BASE_SHIFT
+            }
 
-        //     self.clock_base *= 1000000; // convert to Hz
-        //     if clk_mul != 0 {
-        //         self.clock_base *= clk_mul;
-        //     }
-        // }
+            self.clock_base *= 1000000; // convert to Hz
+            if clk_mul != 0 {
+                self.clock_base *= clk_mul;
+            }
+        }
 
-        // if self.clock_base == 0 {
-        //     info!("Hardware doesn't specify base clock frequency");
-        //     return Err(SdError::UnsupportedCard);
-        // }
+        if self.clock_base == 0 {
+            info!("Hardware doesn't specify base clock frequency");
+            return Err(SdError::UnsupportedCard);
+        }
 
-        // let mut voltages = 0;
+        let mut voltages = 0;
 
-        // if (caps1 & EMMC_CAN_VDD_330) != 0 {
-        //     voltages |= MMC_VDD_32_33 | MMC_VDD_33_34;
-        // } else if (caps1 & EMMC_CAN_VDD_300) != 0 {
-        //     voltages |= MMC_VDD_29_30 | MMC_VDD_30_31;
-        // } else if (caps1 & EMMC_CAN_VDD_180) != 0 {
-        //     voltages |= MMC_VDD_165_195;
-        // } else {
-        //     info!("Unsupported voltage range");
-        //     return Err(SdError::UnsupportedCard);
-        // } 
+        if (caps1 & EMMC_CAN_VDD_330) != 0 {
+            voltages |= MMC_VDD_32_33 | MMC_VDD_33_34;
+        } else if (caps1 & EMMC_CAN_VDD_300) != 0 {
+            voltages |= MMC_VDD_29_30 | MMC_VDD_30_31;
+        } else if (caps1 & EMMC_CAN_VDD_180) != 0 {
+            voltages |= MMC_VDD_165_195;
+        } else {
+            info!("Unsupported voltage range");
+            return Err(SdError::UnsupportedCard);
+        } 
 
-        // info!("voltage range: {:#x}", generic_fls(voltages as u32) - 1);
+        info!("voltage range: {:#x}", generic_fls(voltages as u32) - 1);
 
-        // // Reset the controller
-        // self.reset_all()?;
+        // Reset the controller
+        self.reset_all()?;
 
-        // // Perform full power cycle
-        // self.sdhci_set_power(generic_fls(voltages as u32) - 1)?;
+        // Perform full power cycle
+        self.sdhci_set_power(generic_fls(voltages as u32) - 1)?;
 
-        // // Enable interrupts
-        // self.write_reg(EMMC_NORMAL_INT_STAT_EN, EMMC_INT_CMD_MASK | EMMC_INT_DATA_MASK);
-        // self.write_reg(EMMC_SIGNAL_ENABLE, 0x0);
+        // Enable interrupts
+        self.write_reg(EMMC_NORMAL_INT_STAT_EN, EMMC_INT_CMD_MASK | EMMC_INT_DATA_MASK);
+        self.write_reg(EMMC_SIGNAL_ENABLE, 0x0);
 
-        // // Set initial bus width to 1-bit
-        // let ctrl = self.read_reg8(EMMC_HOST_CTRL1);
+        // Set initial bus width to 1-bit
+        let ctrl = self.read_reg8(EMMC_HOST_CTRL1);
 
-        // info!("EMMC Host Control 1: {:#x}", ctrl & !EMMC_CTRL_4BITBUS & !EMMC_CTRL_8BITBUS);
+        info!("EMMC Host Control 1: {:#x}", ctrl & !EMMC_CTRL_4BITBUS & !EMMC_CTRL_8BITBUS);
 
         self.write_reg8(EMMC_HOST_CTRL1, ctrl & !EMMC_CTRL_4BITBUS & !EMMC_CTRL_8BITBUS);
 
         // Set initial clock and wait for it to stabilize
-        self.dwcmshc_sdhci_emmc_set_clock(375000)?; // Start with 400 KHz for initialization
+        debug!("emmc_get_clk {}", clk.emmc_get_clk().unwrap());
+        self.dwcmshc_sdhci_emmc_set_clock(375000, clk)?; // Start with 400 KHz for initialization
 
         self.write_reg16(EMMC_HOST_CTRL2, 0);
 
@@ -172,34 +179,17 @@ impl EMmcHost {
         // let size = 0x1000;
         // unsafe { dump_memory_region(addr, size) };
 
-        // // Check if card is present
-        // if !self.is_card_present() {
-        //     return Err(SdError::NoCard);
-        // }
-        
-        // self.write_reg(EMMC_AT_STAT, 0x00000000);
-
-        // loop {
-        //     if self.read_reg(EMMC_AT_STAT) == 0 {
-        //         break;
-        //     }
-        // }
-
-        let cmd: EMmcCommand = EMmcCommand::new(MMC_ALL_SEND_CID, 0, MMC_RSP_R2);
-        self.send_command(&cmd)?;
-        let response = self.get_response();
-
-        info!("eMMC Card CID: {:b} {:b} {:b} {:b}", 
-            response.as_r2()[0], response.as_r2()[1], 
-            response.as_r2()[2], response.as_r2()[3]);
-
+        // Check if card is present
+        if !self.is_card_present() {
+            return Err(SdError::NoCard);
+        }
 
         // unsafe {
         //     dump_memory_region(self.base_addr, 0x1000);
         // }
 
-        // // Initialize the card
-        // self.init_card()?;
+        // Initialize the card
+        self.init_card()?;
         
         info!("EMMC initialization completed successfully");
         Ok(())
@@ -258,8 +248,8 @@ impl EMmcHost {
         let ocr = 0x00; // 2.7V to 3.6V
         let retry = 100;
 
-        // // Create card structure
-        // let mut card = EMmcCard::init(self.base_addr, CardType::Mmc);
+        // Create card structure
+        let mut card = EMmcCard::init(self.base_addr, CardType::Mmc);
 
         self.mmc_go_idle()?;
 
@@ -272,25 +262,14 @@ impl EMmcHost {
 
         debug!("{:x}", self.get_response().as_r3());
 
-        self.mmc_go_idle()?;
-
-        delay_us(1000000);
-
-        cmd = EMmcCommand::new(MMC_SEND_OP_COND, ocr, MMC_RSP_R3);
-        self.send_command(&cmd)?;
-        
-        delay_us(1000000);
-
-        debug!("{:x}", self.get_response().as_r3());
-
         // // Send CMD0 to reset the card
         // self.mmc_go_idle()?;
 
         // // Send CMD1 to set OCR and check if card is ready
         // self.mmc_send_op_cond(&mut card, ocr, retry)?;
 
-        // // Send CMD2 to get CID
-        // self.mmc_all_send_cid(&mut card)?;
+        // Send CMD2 to get CID
+        self.mmc_all_send_cid(&mut card)?;
 
         // // Send CMD3 to get RCA
         // self.mmc_set_relative_addr(&mut card)?;

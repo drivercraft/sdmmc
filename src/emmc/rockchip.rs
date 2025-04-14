@@ -2,13 +2,13 @@ use log::{debug, info};
 
 use crate::{delay_us, err::SdError};
 
-use super::{constant::*, EMmcHost};
+use super::{clock::RK3568ClkPri, constant::*, EMmcHost};
 
 const EMMC_CLOCK: u32 = 375000;
 
 impl EMmcHost {
     // Rockchip EMMC设置时钟函数
-    fn rockchip_emmc_set_clock(&mut self, freq: u32) -> Result<(), SdError> {
+    fn rockchip_emmc_set_clock(&mut self, freq: u32, clk: &mut RK3568ClkPri) -> Result<(), SdError> {
         // wait for command and data inhibit to be cleared
         let mut timeout = 200;
         while (self.read_reg(EMMC_PRESENT_STATE) & (EMMC_CMD_INHIBIT | EMMC_DATA_INHIBIT)) != 0 {
@@ -29,7 +29,7 @@ impl EMmcHost {
         }
 
         // 计算输入时钟
-        let input_clk = 200_000_000;
+        let input_clk = clk.emmc_set_clk(freq as u64).unwrap() as u32;
         info!("input_clk: {}", input_clk);
 
         // 根据SDHCI规范版本计算分频器
@@ -98,9 +98,8 @@ impl EMmcHost {
     }
 
     // DWCMSHC SDHCI EMMC设置时钟
-    pub fn dwcmshc_sdhci_emmc_set_clock(&mut self, freq: u32) -> Result<(), SdError> {
-
-        self.rockchip_emmc_set_clock(freq)?;
+    pub fn dwcmshc_sdhci_emmc_set_clock(&mut self, freq: u32, clk: &mut RK3568ClkPri) -> Result<(), SdError> {
+        self.rockchip_emmc_set_clock(freq, clk)?;
 
         info!("Clock {:#x}", self.read_reg16(EMMC_CLOCK_CONTROL));
         
@@ -139,7 +138,7 @@ impl EMmcHost {
             self.write_reg(DWCMSHC_EMMC_DLL_STRBIN, extra);
         }
 
-        self.rockchip_emmc_set_clock(freq)?;
+        self.rockchip_emmc_set_clock(freq, clk)?;
 
         // Enable card clock
         self.enable_card_clock(0)?;
