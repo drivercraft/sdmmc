@@ -1,6 +1,6 @@
 use log::{debug, info};
 
-use crate::err::SdError;
+use crate::{delay_us, err::SdError};
 
 use super::{EMmcHost, constant::*};
 
@@ -71,13 +71,18 @@ impl EMmcHost {
     // Send a command to the card
     pub fn send_command(&self, cmd: &EMmcCommand) -> Result<(), SdError> {
         // Check if command or data lines are busy
-        let mut timeout = 100000;
+        let mut timeout = 100;
         while (self.read_reg(EMMC_PRESENT_STATE) & (EMMC_CMD_INHIBIT | EMMC_DATA_INHIBIT)) != 0 {
             if timeout == 0 {
                 return Err(SdError::Timeout);
             }
             timeout -= 1;
+            delay_us(1000);
         }
+        
+        // 清除所有中断状态
+        self.write_reg16(EMMC_NORMAL_INT_STAT, 0xFFFF);
+        self.write_reg16(EMMC_ERROR_INT_STAT, 0xFFFF);
 
         info!(
             "Sending command: opcode={:#x}, arg={:#x}, resp_type={:#x}",
@@ -140,9 +145,9 @@ impl EMmcHost {
 
         // Use longer timeout for initialization commands
         let timeout_val = if cmd.opcode == MMC_GO_IDLE_STATE || cmd.opcode == MMC_SEND_OP_COND {
-            500000 // Longer timeout for initialization commands
+            500 // Longer timeout for initialization commands
         } else {
-            100000 // Standard timeout
+            100 // Standard timeout
         };
 
         // Wait for command completion using polling
@@ -184,18 +189,12 @@ impl EMmcHost {
                         self.reset_data()?;
                     }
 
-                    // Clear error status
-                    self.write_reg16(EMMC_NORMAL_INT_STAT, status);
-                    self.write_reg16(EMMC_ERROR_INT_STAT, err_status);
+                    // // Clear error status
+                    // self.write_reg16(EMMC_NORMAL_INT_STAT, status);
+                    // self.write_reg16(EMMC_ERROR_INT_STAT, err_status);
 
-                    debug!(
-                        "EMMC Normal Int Status: 0x{:x}",
-                        self.read_reg16(EMMC_NORMAL_INT_STAT)
-                    );
-                    debug!(
-                        "EMMC Error Int Status: 0x{:x}",
-                        self.read_reg16(EMMC_ERROR_INT_STAT)
-                    );
+                    // debug!("EMMC Normal Int Status: 0x{:x}", self.read_reg16(EMMC_NORMAL_INT_STAT));
+                    // debug!("EMMC Error Int Status: 0x{:x}", self.read_reg16(EMMC_ERROR_INT_STAT));
 
                     // Map specific error types
                     let err = if err_status & 0x1 != 0 {
@@ -225,6 +224,7 @@ impl EMmcHost {
             }
 
             timeout -= 1;
+            delay_us(1000); // Delay to avoid busy-waiting
         }
 
         if timeout == 0 {
@@ -235,7 +235,7 @@ impl EMmcHost {
 
         // If data is present, wait for data completion
         if cmd.data_present {
-            timeout = 100000;
+            timeout = 100;
             while timeout > 0 {
                 let status = self.read_reg16(EMMC_NORMAL_INT_STAT);
 
@@ -278,6 +278,7 @@ impl EMmcHost {
                 }
 
                 timeout -= 1;
+                delay_us(1000); // Delay to avoid busy-waiting
             }
 
             if timeout == 0 {
@@ -295,12 +296,30 @@ impl EMmcHost {
         self.write_reg8(EMMC_SOFTWARE_RESET, EMMC_RESET_CMD);
 
         // Wait for reset to complete
-        let mut timeout = 100000;
+        let mut timeout = 100;
         while (self.read_reg8(EMMC_SOFTWARE_RESET) & EMMC_RESET_CMD) != 0 {
             if timeout == 0 {
                 return Err(SdError::Timeout);
             }
             timeout -= 1;
+            delay_us(1000);
+        }
+
+        Ok(())
+    }
+
+    // Reset data line
+    pub fn reset_data(&self) -> Result<(), SdError> {
+        self.write_reg8(EMMC_SOFTWARE_RESET, EMMC_RESET_DATA);
+
+        // Wait for reset to complete
+        let mut timeout = 100;
+        while (self.read_reg8(EMMC_SOFTWARE_RESET) & EMMC_RESET_DATA) != 0 {
+            if timeout == 0 {
+                return Err(SdError::Timeout);
+            }
+            timeout -= 1;
+            delay_us(1000);
         }
 
         Ok(())

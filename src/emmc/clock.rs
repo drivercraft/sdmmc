@@ -1,5 +1,5 @@
 use core::fmt;
-use core::ptr::{self, read_volatile, write_volatile};
+use core::ptr::{read_volatile, write_volatile};
 use log::debug;
 
 /// RK3568 eMMC时钟源选择常量
@@ -28,11 +28,28 @@ const OSC_HZ: u64 = 24 * MHZ;      // 24 MHz
 const CCLK_EMMC_SEL_MASK: u32 = 0x7 << 12;
 const CCLK_EMMC_SEL_SHIFT: u32 = 12;
 
+/// 复位相关常量
+const SOFTRST_MASK: u32 = 0x1;
+
+/// 时钟门控掩码
+const CLKGATE_MASK: u32 = 0x1;
+
+/// RK3568 外设ID定义
+#[derive(Debug, Clone, Copy)]
+pub enum RK3568PeripheralId {
+    Emmc,
+    Sdmmc0,
+    Sdmmc1,
+    Sdmmc2,
+}
+
 /// 错误类型
 #[derive(Debug, Clone, Copy)]
 pub enum RK3568Error {
     InvalidClockRate,
     RegisterOperationFailed,
+    InvalidPeripheralId,
+    ResetTimeout,
 }
 
 /// RK3568 时钟控制单元寄存器结构
@@ -71,8 +88,18 @@ impl fmt::Display for RK3568Error {
         match self {
             RK3568Error::InvalidClockRate => write!(f, "Invalid clock rate"),
             RK3568Error::RegisterOperationFailed => write!(f, "Register operation failed"),
+            RK3568Error::InvalidPeripheralId => write!(f, "Invalid peripheral ID"),
+            RK3568Error::ResetTimeout => write!(f, "Reset operation timed out"),
         }
     }
+}
+
+/// 外设复位配置表
+struct PeripheralResetConfig {
+    softrst_con_idx: usize,  // softrst_con 寄存器数组索引
+    softrst_bit: u32,        // 软复位位位置
+    clkgate_con_idx: usize,  // clkgate_con 寄存器数组索引
+    clkgate_bit: u32,        // 时钟门控位位置
 }
 
 impl RK3568ClkPri {
@@ -81,6 +108,143 @@ impl RK3568ClkPri {
         Self {
             cru: cru_ptr,
         }
+    }
+
+    /// 获取外设复位配置
+    fn get_peripheral_reset_config(&self, peripheral: RK3568PeripheralId) -> Result<PeripheralResetConfig, RK3568Error> {
+        // 返回每个外设的复位寄存器配置
+        match peripheral {
+            RK3568PeripheralId::Emmc => Ok(PeripheralResetConfig {
+                softrst_con_idx: 12,
+                softrst_bit: 14,
+                clkgate_con_idx: 9,
+                clkgate_bit: 7,
+            }),
+            _ => Err(RK3568Error::InvalidPeripheralId),
+        }
+    }
+
+    /// 复位单个外设
+    pub fn reset_peripheral(&mut self, peripheral: RK3568PeripheralId) -> Result<(), RK3568Error> {
+        // 获取外设复位配置
+        let config = self.get_peripheral_reset_config(peripheral)?;
+        
+        // 安全地访问CRU寄存器
+        unsafe {
+            // 1. 首先禁用时钟
+            let clkgate_addr = &mut (*self.cru).clkgate_con[config.clkgate_con_idx];
+            self.rk_clrsetreg(
+                clkgate_addr,
+                CLKGATE_MASK << config.clkgate_bit,
+                CLKGATE_MASK << config.clkgate_bit  // 1 = 禁用时钟
+            );
+            
+            // 2. 应用软复位 (1 = 复位有效)
+            let softrst_addr = &mut (*self.cru).softrst_con[config.softrst_con_idx];
+            self.rk_clrsetreg(
+                softrst_addr,
+                SOFTRST_MASK << config.softrst_bit,
+                SOFTRST_MASK << config.softrst_bit
+            );
+            
+            // 3. 短暂延迟，确保复位完成
+            for _ in 0..100 {
+                core::hint::spin_loop();
+            }
+            
+            // 4. 释放软复位 (0 = 复位取消)
+            self.rk_clrsetreg(
+                softrst_addr,
+                SOFTRST_MASK << config.softrst_bit,
+                0
+            );
+            
+            // 5. 重新使能时钟
+            self.rk_clrsetreg(
+                clkgate_addr,
+                CLKGATE_MASK << config.clkgate_bit,
+                0  // 0 = 使能时钟
+            );
+        }
+        
+        debug!("Reset peripheral {:?} completed", peripheral);
+        Ok(())
+    }
+
+    /// 全局复位系统时钟
+    pub fn reset_clock_system(&mut self) -> Result<(), RK3568Error> {
+        unsafe {
+            // 1. 设置全局软复位控制值 (可能需要特定值/模式)
+            write_volatile(&mut (*self.cru).glb_rst_con, 0x1);
+            
+            // 2. 触发第一阶段复位
+            write_volatile(&mut (*self.cru).glb_srst_fst, 0x1);
+            
+            // 3. 等待复位状态变化 (可能需要检查特定位)
+            let mut timeout = 1000;
+            while (read_volatile(&(*self.cru).glb_rst_st) & 0x1) == 0 {
+                if timeout == 0 {
+                    return Err(RK3568Error::ResetTimeout);
+                }
+                timeout -= 1;
+                core::hint::spin_loop();
+            }
+            
+            // 4. 触发第二阶段复位
+            write_volatile(&mut (*self.cru).glb_srsr_snd, 0x1);
+
+            debug!("Global clock system reset completed");
+        }
+        
+        Ok(())
+    }
+
+    /// 复位所有外设时钟
+    pub fn reset_all_peripherals(&mut self) -> Result<(), RK3568Error> {
+        // 列出要复位的所有外设
+        let peripherals = [
+            RK3568PeripheralId::Emmc,
+            RK3568PeripheralId::Sdmmc0,
+            RK3568PeripheralId::Sdmmc1,
+            RK3568PeripheralId::Sdmmc2,
+        ];
+        
+        // 逐个复位外设
+        for &peripheral in peripherals.iter() {
+            if let Err(e) = self.reset_peripheral(peripheral) {
+                debug!("Failed to reset peripheral {:?}: {}", peripheral, e);
+                // 继续复位其他外设，不中断流程
+            }
+        }
+        
+        debug!("All peripherals reset completed");
+        Ok(())
+    }
+
+    /// 复位特定类型的所有外设
+    pub fn reset_peripheral_group(&mut self, group_type: PeripheralGroup) -> Result<(), RK3568Error> {
+        let peripherals = match group_type {
+            PeripheralGroup::Storage => [
+                RK3568PeripheralId::Emmc,
+                RK3568PeripheralId::Sdmmc0,
+                RK3568PeripheralId::Sdmmc1,
+                RK3568PeripheralId::Sdmmc2,
+            ].as_slice(),
+            _ => {
+                return Err(RK3568Error::InvalidPeripheralId);
+            }
+        };
+        
+        // 逐个复位外设
+        for &peripheral in peripherals {
+            if let Err(e) = self.reset_peripheral(peripheral) {
+                debug!("Failed to reset peripheral {:?}: {}", peripheral, e);
+                // 继续复位其他外设，不中断流程
+            }
+        }
+        
+        debug!("Peripheral group {:?} reset completed", group_type);
+        Ok(())
     }
 
     /// 获取当前eMMC时钟频率
@@ -183,6 +347,16 @@ impl RK3568ClkPri {
         let val = ((clr | set) << 16) | set;
         unsafe { write_volatile(addr, val) };
     }
+}
+
+/// 外设分组枚举，用于批量复位操作
+#[derive(Debug, Clone, Copy)]
+pub enum PeripheralGroup {
+    Storage,        // eMMC和SD卡控制器
+    Communication,  // I2C, SPI等通信接口
+    Network,        // 以太网控制器
+    UsbController,  // USB控制器
+    SerialPort,     // UART串口
 }
 
 /// 相位调整相关常量

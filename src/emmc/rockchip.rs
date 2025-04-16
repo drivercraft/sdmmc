@@ -1,29 +1,24 @@
 use log::{debug, info};
-
 use crate::{delay_us, err::SdError};
-
 use super::{clock::RK3568ClkPri, constant::*, EMmcHost};
-
-const EMMC_CLOCK: u32 = 375000;
 
 impl EMmcHost {
     // Rockchip EMMC设置时钟函数
     fn rockchip_emmc_set_clock(&mut self, freq: u32, clk: &mut RK3568ClkPri) -> Result<(), SdError> {
         // wait for command and data inhibit to be cleared
-        let mut timeout = 200;
+        let mut timeout = 20;
         while (self.read_reg(EMMC_PRESENT_STATE) & (EMMC_CMD_INHIBIT | EMMC_DATA_INHIBIT)) != 0 {
             if timeout == 0 {
                 debug!("Timeout waiting for cmd & data inhibit");
                 return Err(SdError::Timeout);
             }
             timeout -= 1;
-            delay_us(100);
+            // delay_us(1000);
         }
 
         // first disable the clock
         self.write_reg16(EMMC_CLOCK_CONTROL, 0x0000);
 
-        // 如果请求的频率为0，则直接返回
         if freq == 0 {
             return Ok(());
         }
@@ -80,10 +75,6 @@ impl EMmcHost {
         info!("EMMC Clock Divisor: {:x}", div);
 
         clk |= ((div as u16) & 0xFF) << EMMC_DIVIDER_SHIFT;
-
-        //  0000 0000 0000 0000
-        //  
-
         clk |= (((div as u16) & 0x300) >> 8) << EMMC_DIVIDER_HI_SHIFT;
 
         info!("EMMC Clock Control: {:#x}", clk);
@@ -100,9 +91,6 @@ impl EMmcHost {
     // DWCMSHC SDHCI EMMC设置时钟
     pub fn dwcmshc_sdhci_emmc_set_clock(&mut self, freq: u32, clk: &mut RK3568ClkPri) -> Result<(), SdError> {
         self.rockchip_emmc_set_clock(freq, clk)?;
-
-        info!("Clock {:#x}", self.read_reg16(EMMC_CLOCK_CONTROL));
-        
         // Disable output clock while config DLL
         self.write_reg16(EMMC_CLOCK_CONTROL, 0);
 
@@ -149,14 +137,13 @@ impl EMmcHost {
     }
     
     pub fn enable_card_clock(&mut self, mut clk: u16) -> Result<(), SdError> {
-        
         clk |= EMMC_CLOCK_INT_EN;
         self.write_reg16(EMMC_CLOCK_CONTROL, clk);
 
         let mut timeout = 20;
         while (self.read_reg16(EMMC_CLOCK_CONTROL) & EMMC_CLOCK_INT_STABLE) == 0 {
             timeout -= 1;
-            delay_us(1000);
+            // delay_us(1000);
             if timeout == 0 {
                 info!("Internal clock never stabilised.");
                 return Err(SdError::Timeout);
@@ -197,32 +184,31 @@ impl EMmcHost {
 
     pub fn is_clock_stable(&self) -> bool {
         let clock_ctrl = self.read_reg16(EMMC_CLOCK_CONTROL);
-        // 检查内部时钟稳定位(通常是bit 1)
-        return (clock_ctrl & 0x0002) != 0;
+        return (clock_ctrl & EMMC_CLOCK_INT_STABLE) != 0;
     }
 
     pub fn sdhci_set_power(&mut self, power: u32) -> Result<(), SdError> {
-        let mut pwr= 0;
+        let mut pwr: u8= 0;
     
-        if power != 0xFFFF {  // Equivalent to (unsigned short)-1 in C
-            match 1 << power {
-                MMC_VDD_165_195 => {
-                    pwr = EMMC_POWER_180;
-                },
-                MMC_VDD_29_30 | MMC_VDD_30_31 => {
-                    pwr = EMMC_POWER_300;
-                },
-                MMC_VDD_32_33 | MMC_VDD_33_34 => {
-                    pwr = EMMC_POWER_330;
-                },
-                _ => {}
-            }
-        }
+        // if power != 0xFFFF {  // Equivalent to (unsigned short)-1 in C
+        //     match 1 << power {
+        //         MMC_VDD_165_195 => {
+        //             pwr = EMMC_POWER_180;
+        //         },
+        //         MMC_VDD_29_30 | MMC_VDD_30_31 => {
+        //             pwr = EMMC_POWER_300;
+        //         },
+        //         MMC_VDD_32_33 | MMC_VDD_33_34 => {
+        //             pwr = EMMC_POWER_330;
+        //         },
+        //         _ => {}
+        //     }
+        // }
     
-        if pwr == 0 {
-            self.write_reg8(EMMC_POWER_CTRL, 0);
-            return Ok(());
-        }
+        // if pwr == 0 {
+        //     self.write_reg8(EMMC_POWER_CTRL, 0);
+        //     return Ok(());
+        // }
     
         pwr |= EMMC_POWER_ON;
         self.write_reg8(EMMC_POWER_CTRL, pwr);
@@ -230,7 +216,7 @@ impl EMmcHost {
         info!("EMMC Power Control: {:#x}", pwr);
 
         // Small delay for power to stabilize
-        delay_us(1000);
+        // delay_us(1000);
 
         Ok(())
     }

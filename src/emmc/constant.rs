@@ -111,6 +111,7 @@ pub const EMMC_TRNS_MULTI: u16 = 0x20;
 pub const EMMC_DATA_INHIBIT: u32 = 0x00000001;
 pub const EMMC_CMD_INHIBIT: u32 = 0x00000002;
 pub const EMMC_CARD_INSERTED: u32 = 0x00010000;
+pub const EMMC_CARD_STABLE: u32 = 0x00020000;
 pub const EMMC_WRITE_PROTECT: u32 = 0x00080000;
 
 // EMMC host control flags
