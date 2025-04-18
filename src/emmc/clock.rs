@@ -55,7 +55,8 @@ pub enum RK3568Error {
 /// RK3568 时钟控制单元寄存器结构
 #[repr(C)]
 pub struct RK3568Cru {
-    pll: [u32; 24],             // PLL 寄存器
+    pll: [u32; 41],             // PLL 寄存器
+    reservedx: [u32; 7],        // 保留
     mode_con00: u32,            // 模式控制寄存器
     misc_con: [u32; 3],         // 杂项控制寄存器
     glb_cnt_th: u32,            // 全局计数阈值
@@ -345,6 +346,9 @@ impl RK3568ClkPri {
     /// 清除并设置寄存器的特定位
     pub fn rk_clrsetreg(&self, addr: *mut u32, clr: u32, set: u32) {
         let val = ((clr | set) << 16) | set;
+
+        debug!("addr {:#x?}, clr, {:#x}, set {:#x} val {:#x}", addr, clr, set, val);
+
         unsafe { write_volatile(addr, val) };
     }
 }

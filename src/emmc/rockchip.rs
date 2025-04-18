@@ -4,7 +4,7 @@ use super::{clock::RK3568ClkPri, constant::*, EMmcHost};
 
 impl EMmcHost {
     // Rockchip EMMC设置时钟函数
-    fn rockchip_emmc_set_clock(&mut self, freq: u32, clk: &mut RK3568ClkPri) -> Result<(), SdError> {
+    pub fn rockchip_emmc_set_clock(&mut self, freq: u32, clk: &mut RK3568ClkPri) -> Result<(), SdError> {
         // wait for command and data inhibit to be cleared
         let mut timeout = 20;
         while (self.read_reg(EMMC_PRESENT_STATE) & (EMMC_CMD_INHIBIT | EMMC_DATA_INHIBIT)) != 0 {
@@ -13,7 +13,7 @@ impl EMmcHost {
                 return Err(SdError::Timeout);
             }
             timeout -= 1;
-            // delay_us(1000);
+            delay_us(1000);
         }
 
         // first disable the clock
@@ -32,7 +32,7 @@ impl EMmcHost {
         let mut clk = 0u16;
         let sdhci_version = self.read_reg16(EMMC_HOST_CNTRL_VER);
         
-        if (sdhci_version & 0x00FF) >= EMMC_SPEC_300 {
+        if (sdhci_version & 0xFF) >= EMMC_SPEC_300 {
             let caps2 = self.read_reg(EMMC_CAPABILITIES2);
             let clk_mul = (caps2 & EMMC_CLOCK_MUL_MASK) >> EMMC_CLOCK_MUL_SHIFT;
 
@@ -77,14 +77,70 @@ impl EMmcHost {
         clk |= ((div as u16) & 0xFF) << EMMC_DIVIDER_SHIFT;
         clk |= (((div as u16) & 0x300) >> 8) << EMMC_DIVIDER_HI_SHIFT;
 
-        info!("EMMC Clock Control: {:#x}", clk);
-
         self.write_reg16(EMMC_CLOCK_CONTROL, clk);
-
         self.enable_card_clock(clk)?;
 
-        debug!("EMMC Clock Control: {:#x}", clk);
-        
+        Ok(())
+    }
+
+    pub fn enable_card_clock(&mut self, mut clk: u16) -> Result<(), SdError> {
+        clk |= EMMC_CLOCK_INT_EN;
+        clk &= !EMMC_CLOCK_INT_STABLE;
+        self.write_reg16(EMMC_CLOCK_CONTROL, clk);
+
+        let mut timeout = 20;
+        while (self.read_reg16(EMMC_CLOCK_CONTROL) & EMMC_CLOCK_INT_STABLE) == 0 {
+            timeout -= 1;
+            delay_us(1000);
+            if timeout == 0 {
+                info!("Internal clock never stabilised.");
+                return Err(SdError::Timeout);
+            }
+        }    
+
+        self.write_reg16(EMMC_CLOCK_CONTROL, clk | EMMC_CLOCK_CARD_EN);
+
+        debug!("EMMC Clock Control: {:#x}", self.read_reg16(EMMC_CLOCK_CONTROL));
+
+        Ok(())
+    }
+
+    pub fn is_clock_stable(&self) -> bool {
+        let clock_ctrl = self.read_reg16(EMMC_CLOCK_CONTROL);
+        return (clock_ctrl & EMMC_CLOCK_INT_STABLE) != 0;
+    }
+
+    pub fn sdhci_set_power(&mut self, power: u32) -> Result<(), SdError> {
+        let mut pwr: u8= 0;
+    
+        if power != 0xFFFF {
+            match 1 << power {
+                MMC_VDD_165_195 => {
+                    pwr = EMMC_POWER_180;
+                },
+                MMC_VDD_29_30 | MMC_VDD_30_31 => {
+                    pwr = EMMC_POWER_300;
+                },
+                MMC_VDD_32_33 | MMC_VDD_33_34 => {
+                    pwr = EMMC_POWER_330;
+                },
+                _ => {}
+            }
+        }
+    
+        if pwr == 0 {
+            self.write_reg8(EMMC_POWER_CTRL, 0);
+            return Ok(());
+        }
+    
+        pwr |= EMMC_POWER_ON;
+        self.write_reg8(EMMC_POWER_CTRL, pwr);
+
+        info!("EMMC Power Control: {:#x}", self.read_reg8(EMMC_POWER_CTRL));
+
+        // Small delay for power to stabilize
+        delay_us(10000);
+
         Ok(())
     }
 
@@ -94,7 +150,7 @@ impl EMmcHost {
         // Disable output clock while config DLL
         self.write_reg16(EMMC_CLOCK_CONTROL, 0);
 
-        info!("Clock {:#x}", self.read_reg16(EMMC_CLOCK_CONTROL));
+        // info!("Clock {:#x}", self.read_reg16(EMMC_CLOCK_CONTROL));
         
         // DLL配置基于频率
         if freq >= 100_000_000 { // 100 MHz
@@ -126,8 +182,6 @@ impl EMmcHost {
             self.write_reg(DWCMSHC_EMMC_DLL_STRBIN, extra);
         }
 
-        self.rockchip_emmc_set_clock(freq, clk)?;
-
         // Enable card clock
         self.enable_card_clock(0)?;
 
@@ -136,90 +190,6 @@ impl EMmcHost {
         Ok(())
     }
     
-    pub fn enable_card_clock(&mut self, mut clk: u16) -> Result<(), SdError> {
-        clk |= EMMC_CLOCK_INT_EN;
-        self.write_reg16(EMMC_CLOCK_CONTROL, clk);
-
-        let mut timeout = 20;
-        while (self.read_reg16(EMMC_CLOCK_CONTROL) & EMMC_CLOCK_INT_STABLE) == 0 {
-            timeout -= 1;
-            // delay_us(1000);
-            if timeout == 0 {
-                info!("Internal clock never stabilised.");
-                return Err(SdError::Timeout);
-            }
-        }    
-
-        self.write_reg16(EMMC_CLOCK_CONTROL, clk | EMMC_CLOCK_CARD_EN);
-
-        Ok(())
-    }
-    
-    // DWCMSHC SDHCI设置增强选通
-    fn dwcmshc_sdhci_set_enhanced_strobe(&mut self) -> Result<(), SdError> {
-        // 获取当前MMC时序模式
-        let timing = MMC_TIMING_MMC_HS400; // 这应该从当前MMC时序状态中获取
-        
-        let mut vendor = self.read_reg(DWCMSHC_EMMC_CONTROL);
-        
-        if timing == MMC_TIMING_MMC_HS400ES {
-            vendor |= DWCMSHC_ENHANCED_STROBE;
-        } else {
-            vendor &= !DWCMSHC_ENHANCED_STROBE;
-        }
-        
-        self.write_reg(DWCMSHC_EMMC_CONTROL, vendor);
-        
-        delay_us(100);
-        
-        Ok(())
-    }
-    
-    // Rockchip SDHCI设置增强选通
-    pub fn rockchip_sdhci_set_enhanced_strobe(&mut self) -> Result<(), SdError> {
-        // 根据设备类型选择适当的增强选通设置函数
-        // 这里假设我们使用DWCMSHC控制器
-        self.dwcmshc_sdhci_set_enhanced_strobe()
-    }
-
-    pub fn is_clock_stable(&self) -> bool {
-        let clock_ctrl = self.read_reg16(EMMC_CLOCK_CONTROL);
-        return (clock_ctrl & EMMC_CLOCK_INT_STABLE) != 0;
-    }
-
-    pub fn sdhci_set_power(&mut self, power: u32) -> Result<(), SdError> {
-        let mut pwr: u8= 0;
-    
-        // if power != 0xFFFF {  // Equivalent to (unsigned short)-1 in C
-        //     match 1 << power {
-        //         MMC_VDD_165_195 => {
-        //             pwr = EMMC_POWER_180;
-        //         },
-        //         MMC_VDD_29_30 | MMC_VDD_30_31 => {
-        //             pwr = EMMC_POWER_300;
-        //         },
-        //         MMC_VDD_32_33 | MMC_VDD_33_34 => {
-        //             pwr = EMMC_POWER_330;
-        //         },
-        //         _ => {}
-        //     }
-        // }
-    
-        // if pwr == 0 {
-        //     self.write_reg8(EMMC_POWER_CTRL, 0);
-        //     return Ok(());
-        // }
-    
-        pwr |= EMMC_POWER_ON;
-        self.write_reg8(EMMC_POWER_CTRL, pwr);
-
-        info!("EMMC Power Control: {:#x}", pwr);
-
-        // Small delay for power to stabilize
-        // delay_us(1000);
-
-        Ok(())
-    }
 }
 
 const EMMC_PROG_CLOCK_MODE: u16 = 0x0020;

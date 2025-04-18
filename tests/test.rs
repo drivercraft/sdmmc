@@ -10,7 +10,7 @@ mod tests {
     use fdt_parser::PciSpace;
     use log::{debug, info, warn};
     use pcie::{CommandRegister, DeviceType, Header, RootComplexGeneric, SimpleBarAllocator};
-    use sdmmc::sdhci::SdHost;
+    use sdmmc::{dump_memory_region, sdhci::SdHost};
     use sdmmc::emmc::EMmcHost;
     use sdmmc::emmc::clock::RK3568ClkPri;
 
@@ -37,20 +37,27 @@ mod tests {
     fn test_uboot(fdt: &fdt_parser::Fdt) {
         let emmc = fdt.find_compatible(&["rockchip,dwcmshc-sdhci"]).next().unwrap();
         let clock = fdt.find_compatible(&["rockchip,rk3568-cru"]).next().unwrap();
-        
-        info!("EMMC: {} Clock: {}", emmc.name, clock.name);
+        let syscon = fdt.find_compatible(&["rockchip,rk3568-grf"]).next().unwrap();
+
+        info!("EMMC: {} Clock: {}, Syscon {}", emmc.name, clock.name, syscon.name);
         
         let emmc_reg = emmc.reg().unwrap().next().unwrap();
         let clk_reg = clock.reg().unwrap().next().unwrap();
+        let syscon_reg = syscon.reg().unwrap().next().unwrap();
         
         println!("EMMC reg {:#x}, {:#x}", emmc_reg.address, emmc_reg.size.unwrap());
         println!("Clock reg {:#x}, {:#x}", clk_reg.address, clk_reg.size.unwrap());
+        println!("Syscon reg {:#x}, {:#x}", syscon_reg.address, syscon_reg.size.unwrap());
         
         let emmc_addr_ptr = iomap((emmc_reg.address as usize).into(), emmc_reg.size.unwrap());
         let clk_add_ptr = iomap((clk_reg.address as usize).into(), clk_reg.size.unwrap());
+        let syscon_addr_ptr = iomap((syscon_reg.address as usize).into(), syscon_reg.size.unwrap());
         
         let emmc_addr = emmc_addr_ptr.as_ptr() as usize;
         let clk_addr = clk_add_ptr.as_ptr() as usize;
+        let syscon_addr = syscon_addr_ptr.as_ptr() as usize;
+
+        unsafe { dump_memory_region(syscon_addr, 0x1000) };
 
         test_emmc(emmc_addr, clk_addr);
 

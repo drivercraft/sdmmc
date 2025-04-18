@@ -80,7 +80,6 @@ impl EMmcHost {
             delay_us(1000);
         }
         
-        // 清除所有中断状态
         self.write_reg16(EMMC_NORMAL_INT_STAT, 0xFFFF);
         self.write_reg16(EMMC_ERROR_INT_STAT, 0xFFFF);
 
@@ -155,7 +154,7 @@ impl EMmcHost {
         while timeout > 0 {
             let status = self.read_reg16(EMMC_NORMAL_INT_STAT);
 
-            info!("Polling status: {:#b}", status);
+            info!("Repsonse Status: {:#b}", status);
 
             // Check for command completion
             if status & EMMC_INT_RESPONSE as u16 != 0 {
@@ -171,9 +170,6 @@ impl EMmcHost {
                     self.read_reg16(EMMC_ERROR_INT_STAT)
                 );
 
-                // Clear the command complete status
-                self.write_reg16(EMMC_NORMAL_INT_STAT, EMMC_INT_RESPONSE as u16);
-
                 // Check for errors
                 if status & (1 << 15) != 0 {
                     // ERROR_INT_STAT bit
@@ -188,13 +184,6 @@ impl EMmcHost {
                     if cmd.data_present {
                         self.reset_data()?;
                     }
-
-                    // // Clear error status
-                    // self.write_reg16(EMMC_NORMAL_INT_STAT, status);
-                    // self.write_reg16(EMMC_ERROR_INT_STAT, err_status);
-
-                    // debug!("EMMC Normal Int Status: 0x{:x}", self.read_reg16(EMMC_NORMAL_INT_STAT));
-                    // debug!("EMMC Error Int Status: 0x{:x}", self.read_reg16(EMMC_ERROR_INT_STAT));
 
                     // Map specific error types
                     let err = if err_status & 0x1 != 0 {
@@ -258,10 +247,6 @@ impl EMmcHost {
 
                     // Reset data line
                     self.reset_data()?;
-
-                    // Clear error status
-                    self.write_reg16(EMMC_NORMAL_INT_STAT, status);
-                    self.write_reg16(EMMC_ERROR_INT_STAT, err_status);
 
                     // Map specific data error
                     let err = if err_status & 0x10 != 0 {

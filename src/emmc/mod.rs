@@ -94,8 +94,8 @@ impl EMmcHost {
 
     // Initialize the host controller
     pub fn init(&mut self, clk: &mut RK3568ClkPri) -> Result<(), SdError> {
-        debug!("emmc_get_clk: {}", clk.emmc_get_clk().unwrap());
-        let _ = clk.emmc_set_clk(200_000_000);
+        // debug!("emmc_get_clk: {}", clk.emmc_get_clk().unwrap());
+        // let _ = clk.emmc_set_clk(200_000_000);
 
         info!("Init EMMC Controller");
 
@@ -169,7 +169,9 @@ impl EMmcHost {
 
         // Set initial clock and wait for it to stabilize
         debug!("emmc_get_clk {}", clk.emmc_get_clk().unwrap());
-        self.dwcmshc_sdhci_emmc_set_clock(375000, clk)?; // Start with 400 KHz for initialization
+        self.dwcmshc_sdhci_emmc_set_clock(400000, clk)?; // Start with 400 KHz for initialization
+
+        info!("is_clock_stable: {}", self.is_clock_stable());
 
         // let addr = 0xfffff000fe310000;
         // let size = 0x1000;
@@ -178,6 +180,8 @@ impl EMmcHost {
         // unsafe {
         //     dump_memory_region(self.base_addr, 0x1000);
         // }
+
+        unsafe { dump_memory_region(0xfffff000fdd20000, 0x1000);}
 
         // Initialize the card
         self.init_card()?;
@@ -230,10 +234,12 @@ impl EMmcHost {
 
         self.mmc_go_idle()?;
 
-        // delay_us(2000);
-
         // Send CMD1 to set OCR and check if card is ready
         self.mmc_send_op_cond(&mut card, ocr, retry)?;
+
+        // For eMMC, host assigns the RCA value (unlike SD where card provides it)
+        let mmc_rca = 0x0002 << 16; // Typical RCA value for eMMC is 1
+        card.rca = mmc_rca;
 
         // Send CMD2 to get CID
         self.mmc_all_send_cid(&mut card)?;
@@ -250,29 +256,26 @@ impl EMmcHost {
     // Send CMD0 to reset the card
     fn mmc_go_idle(&self)  -> Result<(), SdError>{
 
-        // delay_us(100000);
-
         let cmd = EMmcCommand::new(MMC_GO_IDLE_STATE, 0, MMC_RSP_NONE);
         self.send_command(&cmd)?;
 
-        // delay_us(100000);
+        delay_us(100000);
 
         info!("eMMC reset complete");
         Ok(())
     }
 
     // Send CMD1 to set OCR and check if card is ready
-    fn mmc_send_op_cond(&self, card: &mut EMmcCard, ocr: u32, mut retry: u32) -> Result<(), SdError> {
-        // Go idle first
-        self.mmc_go_idle()?;
-
-        // delay_us(100000);
-        
+    fn mmc_send_op_cond(&self, card: &mut EMmcCard, ocr: u32, mut retry: u32) -> Result<(), SdError> {        
         // First iteration - send without args to query capabilities
         let mut cmd = EMmcCommand::new(MMC_SEND_OP_COND, ocr, MMC_RSP_R3);
         self.send_command(&cmd)?;
-        
-        // delay_us(100000);
+
+        // 1100 0001 1111 1111 1000 0001 0000 0001
+        // xxx0 0000 xxxx xxxx xxxx xxxx x000 0000
+        // 1100 0000 1111 1111 1000 0000 1000 0000
+
+        delay_us(100000);
 
         card.ocr = self.get_response().as_r3();
         info!("eMMC first CMD1 response (no args): {:#x}", card.ocr);
@@ -308,9 +311,8 @@ impl EMmcHost {
                 }
             } else {
                 retry -= 1;
-                info!("eMMC CMD1 retry: {}", retry);
                 // Delay between retries
-                delay_us(100000);
+                delay_us(1000);
             }
         }
         
@@ -340,9 +342,6 @@ impl EMmcHost {
             response.as_r2()[0], response.as_r2()[1], 
             response.as_r2()[2], response.as_r2()[3]);
 
-        // For eMMC, host assigns the RCA value (unlike SD where card provides it)
-        let mmc_rca = 0x0002 << 16; // Typical RCA value for eMMC is 1
-        card.rca = mmc_rca;
         Ok(())
     }
 
