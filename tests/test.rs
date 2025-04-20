@@ -10,7 +10,7 @@ mod tests {
     use fdt_parser::PciSpace;
     use log::{debug, info, warn};
     use pcie::{CommandRegister, DeviceType, Header, RootComplexGeneric, SimpleBarAllocator};
-    use sdmmc::{dump_memory_region, sdhci::SdHost};
+    use sdmmc::sdhci::SdHost;
     use sdmmc::emmc::EMmcHost;
     use sdmmc::emmc::clock::RK3568ClkPri;
 
@@ -56,8 +56,6 @@ mod tests {
         let emmc_addr = emmc_addr_ptr.as_ptr() as usize;
         let clk_addr = clk_add_ptr.as_ptr() as usize;
         let syscon_addr = syscon_addr_ptr.as_ptr() as usize;
-
-        unsafe { dump_memory_region(syscon_addr, 0x1000) };
 
         test_emmc(emmc_addr, clk_addr);
 
@@ -186,16 +184,16 @@ mod tests {
 
     fn test_emmc(emmc_addr: usize, clock: usize) {
         // Initialize custom SDHCI controller
-        let mut sdhci = EMmcHost::new(emmc_addr);
+        let mut emmc = EMmcHost::new(emmc_addr);
         let mut clock = unsafe { RK3568ClkPri::new(clock as *mut _) };
 
         // Try to initialize the SD card
-        match sdhci.init(&mut clock) {
+        match emmc.init(&mut clock) {
             Ok(_) => {
                 println!("SD card initialization successful!");
                 
                 // Get card information
-                match sdhci.get_card_info() {
+                match emmc.get_card_info() {
                     Ok(card_info) => {
                         println!("Card type: {:?}", card_info.card_type);
                         println!("Manufacturer ID: 0x{:02X}", card_info.manufacturer_id);

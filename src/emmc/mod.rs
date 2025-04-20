@@ -13,7 +13,7 @@ use block::EMmcCard;
 use clock::RK3568ClkPri;
 use constant::*;
 use cmd::*;
-use crate::{delay_us, dump_memory_region, err::*, generic_fls};
+use crate::{delay_us, err::*, generic_fls};
 use log::{debug, info};
 
 #[derive(Debug, Clone, Copy)]
@@ -94,9 +94,6 @@ impl EMmcHost {
 
     // Initialize the host controller
     pub fn init(&mut self, clk: &mut RK3568ClkPri) -> Result<(), SdError> {
-        // debug!("emmc_get_clk: {}", clk.emmc_get_clk().unwrap());
-        // let _ = clk.emmc_set_clk(200_000_000);
-
         info!("Init EMMC Controller");
 
         // Reset the controller
@@ -173,18 +170,8 @@ impl EMmcHost {
 
         info!("is_clock_stable: {}", self.is_clock_stable());
 
-        // let addr = 0xfffff000fe310000;
-        // let size = 0x1000;
-        // unsafe { dump_memory_region(addr, size) };
-
-        // unsafe {
-        //     dump_memory_region(self.base_addr, 0x1000);
-        // }
-
-        unsafe { dump_memory_region(0xfffff000fdd20000, 0x1000);}
-
         // Initialize the card
-        self.init_card()?;
+        self.init_card(clk)?;
         
         info!("EMMC initialization completed successfully");
         Ok(())
@@ -222,7 +209,7 @@ impl EMmcHost {
     }
 
     // Initialize the eMMC card
-    fn init_card(&mut self) -> Result<(), SdError> {
+    fn init_card(&mut self, clk: &mut RK3568ClkPri) -> Result<(), SdError> {
         info!("eMMC initialization started");
         // For eMMC, we use CMD1 instead of ACMD41
         // HCS=1, voltage window for eMMC as per specs
@@ -238,7 +225,7 @@ impl EMmcHost {
         self.mmc_send_op_cond(&mut card, ocr, retry)?;
 
         // For eMMC, host assigns the RCA value (unlike SD where card provides it)
-        let mmc_rca = 0x0002 << 16; // Typical RCA value for eMMC is 1
+        let mmc_rca = 0x0001 << 16; // Typical RCA value for eMMC is 1
         card.rca = mmc_rca;
 
         // Send CMD2 to get CID
@@ -250,6 +237,113 @@ impl EMmcHost {
         // Send CMD9 to get CSD
         self.mmc_send_csd(&mut card)?;
 
+        // CID: 
+        //  0: 0001 1100 0100 1101 0100 0111 0011 1011
+        // 32: 0011 0011 0011 0010 0000 0000 0101 0011
+        // 64: 0101 1001 0011 0010 0101 0000 0011 0000
+        // 96: 0000 0000 1001 1011 0000 0001 0000 0000
+        // CSD: 
+        //  0: 1110 1111 1000 1010 0100 0000 0000 0000
+        // EF8A4000
+        // 32: 1111 1111 1111 1111 1111 1111 1111 1111
+        // 64: 0011 0010 1000 1111 0101 1001 0000 0011
+        // 96: 0000 0000 1101 0000 0100 1111 0000 0001
+
+        // cmd->response[0] = 0xD04F0132
+        // cmd->response[1] = 0x8F5903FF
+        // cmd->response[2] = 0xFFFFFFEF
+        // cmd->response[3] = 0x8A400000
+
+        // Calculate card capacity from CSD
+        let csd_version = (card.csd[0] >> 26) & 0xf;
+        debug!("eMMC CSD version: {}", csd_version);
+
+        if csd_version <= 2 {
+            // Standard capacity calculation for older eMMC
+            let c_size = ((card.csd[2] & 0x3) << 10) | ((card.csd[1] >> 22) & 0x3FF);
+            let c_size_mult = (card.csd[1] >> 7) & 0x7;
+            let read_bl_len = (card.csd[2] >> 8) & 0xF;
+            
+            debug!("c_size: {}, c_size_mult: {}, read_bl_len: {}", c_size, c_size_mult, read_bl_len);
+            
+            let block_size = 1 << read_bl_len;
+            let mult = 1 << (c_size_mult + 2);
+            let capacity = (c_size + 1) as u64 * mult as u64 * block_size as u64;
+            card.capacity_blocks = capacity / 512;
+            
+            debug!("eMMC capacity: {} blocks ({} bytes)", 
+                card.capacity_blocks, card.capacity_blocks * 512);
+        }
+        //  else {
+        //     // For newer eMMC rev4.4+, may need to read Extended CSD
+        //     let c_size = ((card.csd[2] & 0x3) << 10) | ((card.csd[1] >> 22) & 0x3FF);
+        //     let c_size_mult = (card.csd[1] >> 7) & 0x7;
+        //     let read_bl_len = (card.csd[2] >> 8) & 0xF;
+            
+        //     let block_size = 1 << read_bl_len;
+        //     let mult = 1 << (c_size_mult + 2);
+        //     let capacity = (c_size + 1) as u64 * mult as u64 * block_size as u64;
+        //     card.capacity_blocks = capacity / 512;
+            
+        //     debug!("eMMC capacity (from CSD): {} blocks", card.capacity_blocks);
+        // }
+
+        // // Set block size to 512 bytes (standard for eMMC)
+        // card.block_size = 512;
+
+        // // Send CMD7 to select the card
+        // let cmd = EMmcCommand::new(MMC_SELECT_CARD, card.rca, MMC_RSP_R1B);
+        // self.send_command(&cmd)?;
+
+        // // Set block size to 512 bytes
+        // let cmd = EMmcCommand::new(MMC_SET_BLOCKLEN, 512, MMC_RSP_R1);
+        // self.send_command(&cmd)?;
+        
+        // // Switch to wider bus width if supported
+        // if !self.is_write_protected() {
+        //     // For eMMC, use CMD6 to switch to wider bus width
+        //     // 8-bit bus width if hardware supports it
+        //     if self.supports_8bit_bus() {
+        //         // Add delay before bus width switch
+        //         for _ in 0..10000 {
+        //             let _ = self.read_reg8(EMMC_POWER_CTRL);
+        //         }
+                
+        //         let cmd = EMmcCommand::new(MMC_SWITCH, 
+        //                                 (3 << 24) | (183 << 16) | (2 << 8) | 1, 
+        //                                 MMC_RSP_R1B);
+        //         if self.send_command(&cmd).is_ok() {
+        //             // Set controller to 8-bit mode
+        //             let ctrl = self.read_reg8(EMMC_HOST_CTRL1);
+        //             self.write_reg8(EMMC_HOST_CTRL1, ctrl | EMMC_CTRL_8BITBUS);
+        //             info!("eMMC: Switched to 8-bit bus width");
+                    
+        //             // Add delay after bus width switch
+        //             for _ in 0..10000 {
+        //                 let _ = self.read_reg8(EMMC_POWER_CTRL);
+        //             }
+        //         }
+        //     } else {
+        //         // Try 4-bit bus width
+        //         let cmd = EMmcCommand::new(MMC_SWITCH, 
+        //                                 (3 << 24) | (183 << 16) | (1 << 8) | 1, 
+        //                                 MMC_RSP_R1B);
+        //         if self.send_command(&cmd).is_ok() {
+        //             // Set controller to 4-bit mode
+        //             let ctrl = self.read_reg8(EMMC_HOST_CTRL1);
+        //             self.write_reg8(EMMC_HOST_CTRL1, ctrl | EMMC_CTRL_4BITBUS);
+        //             info!("eMMC: Switched to 4-bit bus width");
+                    
+        //             // Add delay after bus width switch
+        //             for _ in 0..10000 {
+        //                 let _ = self.read_reg8(EMMC_POWER_CTRL);
+        //             }
+        //         }
+        //     }
+        // }
+
+        info!("eMMC initialization complete");
+
         Ok(())
     }
 
@@ -259,7 +353,7 @@ impl EMmcHost {
         let cmd = EMmcCommand::new(MMC_GO_IDLE_STATE, 0, MMC_RSP_NONE);
         self.send_command(&cmd)?;
 
-        delay_us(100000);
+        delay_us(10000);
 
         info!("eMMC reset complete");
         Ok(())
@@ -275,7 +369,7 @@ impl EMmcHost {
         // xxx0 0000 xxxx xxxx xxxx xxxx x000 0000
         // 1100 0000 1111 1111 1000 0000 1000 0000
 
-        delay_us(100000);
+        delay_us(10000);
 
         card.ocr = self.get_response().as_r3();
         info!("eMMC first CMD1 response (no args): {:#x}", card.ocr);
@@ -364,10 +458,15 @@ impl EMmcHost {
             response.as_r2()[0], response.as_r2()[1], 
             response.as_r2()[2], response.as_r2()[3]);
 
-        // Calculate card capacity from CSD
-        let csd_version = (card.csd[3] >> 22) & 0x3;
-        debug!("eMMC CSD version: {}", csd_version);
         Ok(())
+    }
+
+    // Helper function to check if controller supports 8-bit bus
+    fn supports_8bit_bus(&self) -> bool {
+        // Read controller capabilities register
+        // This is a placeholder - actual implementation depends on your EMMC controller
+        let caps = self.read_reg(EMMC_CAPABILITIES1);
+        (caps & EMMC_CAN_DO_8BIT) != 0
     }
 
     // Get card status

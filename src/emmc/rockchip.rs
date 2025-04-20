@@ -149,8 +149,6 @@ impl EMmcHost {
         self.rockchip_emmc_set_clock(freq, clk)?;
         // Disable output clock while config DLL
         self.write_reg16(EMMC_CLOCK_CONTROL, 0);
-
-        // info!("Clock {:#x}", self.read_reg16(EMMC_CLOCK_CONTROL));
         
         // DLL配置基于频率
         if freq >= 100_000_000 { // 100 MHz
