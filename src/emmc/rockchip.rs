@@ -1,10 +1,10 @@
 use log::{debug, info};
 use crate::{delay_us, err::SdError};
-use super::{clock::RK3568ClkPri, constant::*, EMmcHost};
+use super::{clock::RK3568ClkPriv, constant::*, EMmcHost};
 
 impl EMmcHost {
     // Rockchip EMMC设置时钟函数
-    pub fn rockchip_emmc_set_clock(&mut self, freq: u32, clk: &mut RK3568ClkPri) -> Result<(), SdError> {
+    pub fn rockchip_emmc_set_clock(&mut self, freq: u32, clk: &mut RK3568ClkPriv) -> Result<(), SdError> {
         // wait for command and data inhibit to be cleared
         let mut timeout = 20;
         while (self.read_reg(EMMC_PRESENT_STATE) & (EMMC_CMD_INHIBIT | EMMC_DATA_INHIBIT)) != 0 {
@@ -145,7 +145,7 @@ impl EMmcHost {
     }
 
     // DWCMSHC SDHCI EMMC设置时钟
-    pub fn dwcmshc_sdhci_emmc_set_clock(&mut self, freq: u32, clk: &mut RK3568ClkPri) -> Result<(), SdError> {
+    pub fn dwcmshc_sdhci_emmc_set_clock(&mut self, freq: u32, clk: &mut RK3568ClkPriv) -> Result<(), SdError> {
         self.rockchip_emmc_set_clock(freq, clk)?;
         // Disable output clock while config DLL
         self.write_reg16(EMMC_CLOCK_CONTROL, 0);

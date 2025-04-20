@@ -12,7 +12,7 @@ mod tests {
     use pcie::{CommandRegister, DeviceType, Header, RootComplexGeneric, SimpleBarAllocator};
     use sdmmc::sdhci::SdHost;
     use sdmmc::emmc::EMmcHost;
-    use sdmmc::emmc::clock::RK3568ClkPri;
+    use sdmmc::emmc::clock::RK3568ClkPriv;
 
     #[test]
     fn test_platform() {
@@ -185,7 +185,7 @@ mod tests {
     fn test_emmc(emmc_addr: usize, clock: usize) {
         // Initialize custom SDHCI controller
         let mut emmc = EMmcHost::new(emmc_addr);
-        let mut clock = unsafe { RK3568ClkPri::new(clock as *mut _) };
+        let mut clock = unsafe { RK3568ClkPriv::new(clock as *mut _) };
 
         // Try to initialize the SD card
         match emmc.init(&mut clock) {

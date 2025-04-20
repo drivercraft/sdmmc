@@ -10,7 +10,7 @@ pub mod clock;
 
 use core::{fmt::Display, sync::atomic::Ordering};
 use block::EMmcCard;
-use clock::RK3568ClkPri;
+use clock::RK3568ClkPriv;
 use constant::*;
 use cmd::*;
 use crate::{delay_us, err::*, generic_fls};
@@ -93,7 +93,7 @@ impl EMmcHost {
     }
 
     // Initialize the host controller
-    pub fn init(&mut self, clk: &mut RK3568ClkPri) -> Result<(), SdError> {
+    pub fn init(&mut self, clk: &mut RK3568ClkPriv) -> Result<(), SdError> {
         info!("Init EMMC Controller");
 
         // Reset the controller
@@ -209,7 +209,7 @@ impl EMmcHost {
     }
 
     // Initialize the eMMC card
-    fn init_card(&mut self, clk: &mut RK3568ClkPri) -> Result<(), SdError> {
+    fn init_card(&mut self, clk: &mut RK3568ClkPriv) -> Result<(), SdError> {
         info!("eMMC initialization started");
         // For eMMC, we use CMD1 instead of ACMD41
         // HCS=1, voltage window for eMMC as per specs
