@@ -1,10 +1,12 @@
+use core::borrow::Borrow;
+
 use log::{debug, info};
-use crate::{delay_us, err::SdError};
-use super::{clock::RK3568ClkPriv, constant::*, EMmcHost};
+use crate::{delay_us, emmc::{aux::dll_lock_wo_tmout, clock::emmc_set_clk, config::EMmcChipConfig}, err::SdError, sdhci};
+use super::{constant::*, EMmcHost};
 
 impl EMmcHost {
     // Rockchip EMMC设置时钟函数
-    pub fn rockchip_emmc_set_clock(&mut self, freq: u32, clk: &mut RK3568ClkPriv) -> Result<(), SdError> {
+    pub fn rockchip_emmc_set_clock(&mut self, freq: u32) -> Result<(), SdError> {
         // wait for command and data inhibit to be cleared
         let mut timeout = 20;
         while (self.read_reg(EMMC_PRESENT_STATE) & (EMMC_CMD_INHIBIT | EMMC_DATA_INHIBIT)) != 0 {
@@ -24,10 +26,9 @@ impl EMmcHost {
         }
 
         // 计算输入时钟
-        let input_clk = clk.emmc_set_clk(freq as u64).unwrap() as u32;
+        let input_clk = emmc_set_clk(freq as u64).unwrap() as u32;
         info!("input_clk: {}", input_clk);
 
-        // 根据SDHCI规范版本计算分频器
         let mut div = 0;
         let mut clk = 0u16;
         let sdhci_version = self.read_reg16(EMMC_HOST_CNTRL_VER);
@@ -145,21 +146,91 @@ impl EMmcHost {
     }
 
     // DWCMSHC SDHCI EMMC设置时钟
-    pub fn dwcmshc_sdhci_emmc_set_clock(&mut self, freq: u32, clk: &mut RK3568ClkPriv) -> Result<(), SdError> {
-        self.rockchip_emmc_set_clock(freq, clk)?;
+    pub fn dwcmshc_sdhci_emmc_set_clock(&mut self, freq: u32) -> Result<(), SdError> {
+        let mut timeout = 500;
+        let timing = self.card.as_ref().unwrap().timing;
+        let data = EMmcChipConfig::rk3568_config();
+
+        self.rockchip_emmc_set_clock(freq)?;
         // Disable output clock while config DLL
         self.write_reg16(EMMC_CLOCK_CONTROL, 0);
         
         // DLL配置基于频率
         if freq >= 100_000_000 { // 100 MHz
             // Enable DLL
+            self.write_reg(DWCMSHC_EMMC_DLL_CTRL, DWCMSHC_EMMC_DLL_CTRL_RESET);
+            delay_us(10);
+            self.write_reg(DWCMSHC_EMMC_DLL_CTRL, 0);
+            let mut extra = 0x1 << 16 | 0x2 << 17 | 0x3 << 19;
+            self.write_reg(DWCMSHC_EMMC_ATCTRL, extra);
+
+            /* Init DLL Setting */
+            extra = DWCMSHC_EMMC_DLL_START_DEFAULT << DWCMSHC_EMMC_DLL_START_POINT | 
+                    DWCMSHC_EMMC_DLL_INC_VALUE << DWCMSHC_EMMC_DLL_INC |
+                    DWCMSHC_EMMC_DLL_START;
+            self.write_reg(DWCMSHC_EMMC_ATCTRL, extra);
+
+            while !dll_lock_wo_tmout(self.read_reg(DWCMSHC_EMMC_DLL_STATUS0)) {
+                if timeout <= 0 {
+                    info!("Timeout waiting for DLL to be ready");
+                    return Err(SdError::Timeout);
+                }
+                
+                delay_us(10);
+                timeout -= 1;
+            }
+
+            let dll_lock_value = ((self.read_reg(DWCMSHC_EMMC_DLL_STATUS0) & 0xFF) * 2 ) & 0xFF;
+
+            extra = DWCMSHC_EMMC_DLL_DLYENA | DLL_RXCLK_ORI_GATE;
+            if (data.flags & RK_RXCLK_NO_INVERTER) != 0 {
+                extra |= DLL_RXCLK_NO_INVERTER;
+            }
+               
+            if (data.flags & RK_TAP_VALUE_SEL) != 0 {
+                extra |= DLL_TAP_VALUE_SEL | (dll_lock_value << DLL_TAP_VALUE_OFFSET);
+            }
+            self.write_reg(extra, DWCMSHC_EMMC_DLL_RXCLK);
+
+            let mut txclk_tapnum = data.hs200_tx_tap;
+            if (data.flags & RK_DLL_CMD_OUT) != 0 && (timing == MMC_TIMING_MMC_HS400 || timing == MMC_TIMING_MMC_HS400ES) {
+                txclk_tapnum = data.hs400_tx_tap;
+
+                extra = DLL_CMDOUT_SRC_CLK_NEG |
+                    DLL_CMDOUT_BOTH_CLK_EDGE |
+                    DWCMSHC_EMMC_DLL_DLYENA |
+                    (data.hs400_cmd_tap as u32) |
+                    DLL_CMDOUT_TAPNUM_FROM_SW;
+                if (data.flags & RK_TAP_VALUE_SEL) != 0 {
+                    extra |= DLL_TAP_VALUE_SEL | (dll_lock_value << DLL_TAP_VALUE_OFFSET);
+                }
+                    
+                self.write_reg(DECMSHC_EMMC_DLL_CMDOUT, extra);
+            }
+
+            extra = DWCMSHC_EMMC_DLL_DLYENA |
+                DLL_TXCLK_TAPNUM_FROM_SW |
+                DLL_TXCLK_NO_INVERTER |
+                txclk_tapnum as u32;
+            if (data.flags & RK_TAP_VALUE_SEL) != 0 {
+                extra |= DLL_TAP_VALUE_SEL | (dll_lock_value << DLL_TAP_VALUE_OFFSET);
+            }
+            self.write_reg(DWCMSHC_EMMC_DLL_TXCLK, extra);
+
+            extra = DWCMSHC_EMMC_DLL_DLYENA |
+                data.hs400_strbin_tap as u32 |
+                DLL_STRBIN_TAPNUM_FROM_SW;
+            if (data.flags & RK_TAP_VALUE_SEL) != 0 {
+                extra |= DLL_TAP_VALUE_SEL | (dll_lock_value << DLL_TAP_VALUE_OFFSET);
+            }
+            self.write_reg(DWCMSHC_EMMC_DLL_STRBIN, extra);
         } else {
             // Disable dll
             self.write_reg(DWCMSHC_EMMC_DLL_CTRL, 0);
             
             // Disable cmd conflict check
             let mut extra = self.read_reg(DWCMSHC_HOST_CTRL3);
-            debug!("extra: {:#b}", extra);
+
             extra &= !0x1;
             self.write_reg(DWCMSHC_HOST_CTRL3, extra);
             
@@ -187,7 +258,80 @@ impl EMmcHost {
 
         Ok(())
     }
+
+    pub fn sdhci_set_uhs_signaling(&self) {
+        let timing = self.card.as_ref().unwrap().timing;
+
+        let mut ctrl_2 = self.read_reg16(EMMC_HOST_CTRL2);
+        ctrl_2 &= !SDHCI_CTRL_UHS_MASK;
+
+        if (timing != MMC_TIMING_LEGACY) && (timing != MMC_TIMING_MMC_HS) && (timing != MMC_TIMING_SD_HS) {
+            ctrl_2 |= SDHCI_CTRL_VDD_180;
+        }
+
+        if (timing == MMC_TIMING_MMC_HS200) || (timing == MMC_TIMING_UHS_SDR104) {
+            ctrl_2 |= SDHCI_CTRL_UHS_SDR104 | SDHCI_CTRL_DRV_TYPE_A;
+        } else if timing == MMC_TIMING_UHS_SDR12 {
+            ctrl_2 |= SDHCI_CTRL_UHS_SDR12;
+        } else if timing == MMC_TIMING_UHS_SDR25 {
+            ctrl_2 |= SDHCI_CTRL_UHS_SDR25;
+        } else if (timing == MMC_TIMING_UHS_SDR50) || (timing == MMC_TIMING_MMC_HS) {
+            ctrl_2 |= SDHCI_CTRL_UHS_SDR50;
+        } else if (timing == MMC_TIMING_UHS_DDR50) || (timing == MMC_TIMING_MMC_DDR52) {
+            ctrl_2 |= SDHCI_CTRL_UHS_DDR50;
+        } else if timing == MMC_TIMING_MMC_HS400 || timing == MMC_TIMING_MMC_HS400ES {
+            ctrl_2 |= SDHCI_CTRL_HS400 | SDHCI_CTRL_DRV_TYPE_A;
+        }
+
+        self.write_reg16(EMMC_HOST_CTRL2, ctrl_2);
+    }
+
+    pub fn sdhci_set_ios(&mut self) {     
+        let (card_clock, bus_width, timing) = {
+            let card = self.card.as_ref().unwrap();
+            (card.clock, card.bus_width, card.timing)
+        };
+        
+        if card_clock != self.clock {
+            self.dwcmshc_sdhci_emmc_set_clock(card_clock).unwrap();
+        }
     
+        /* Set bus width */
+        let mut ctrl = self.read_reg8(EMMC_HOST_CTRL1);
+        if bus_width == 8 {
+            ctrl &= !EMMC_CTRL_4BITBUS;
+            if self.sdhci_get_version() >= EMMC_SPEC_300 || (self.quirks & SDHCI_QUIRK_USE_WIDE8) != 0 {
+                ctrl |= EMMC_CTRL_8BITBUS;
+            }
+        } else {
+            if self.sdhci_get_version() >= EMMC_SPEC_300 || (self.quirks & SDHCI_QUIRK_USE_WIDE8) != 0 {
+                ctrl &= !EMMC_CTRL_8BITBUS;
+            }
+            if bus_width == 4 {
+                ctrl |= EMMC_CTRL_4BITBUS;
+            } else {
+                ctrl &= !EMMC_CTRL_4BITBUS;
+            }
+        }
+    
+        if !(timing == MMC_TIMING_LEGACY) && (self.quirks & SDHCI_QUIRK_NO_HISPD_BIT) == 0 {
+            ctrl |= EMMC_CTRL_HISPD;
+        } else {
+            ctrl &= !EMMC_CTRL_HISPD;
+        }
+    
+        self.write_reg8(EMMC_HOST_CTRL1, ctrl);
+    
+        if timing != MMC_TIMING_LEGACY && timing != MMC_TIMING_MMC_HS && timing != MMC_TIMING_SD_HS {
+            self.sdhci_set_power(MMC_VDD_165_195_SHIFT).unwrap();
+        }
+    
+        self.sdhci_set_uhs_signaling();
+    }
+
+    fn sdhci_get_version(&self) -> u16 {
+        self.read_reg16(EMMC_HOST_CNTRL_VER) & 0xFF
+    }
 }
 
 const EMMC_PROG_CLOCK_MODE: u16 = 0x0020;

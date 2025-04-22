@@ -1,8 +1,8 @@
 use log::{debug, info};
 
-use crate::{delay_us, err::SdError};
+use crate::{delay_us, emmc::CardType, err::SdError};
 
-use super::{EMmcHost, constant::*};
+use super::{block::EMmcCard, constant::*, EMmcHost};
 
 #[derive(Debug)]
 pub struct EMmcCommand {
@@ -318,5 +318,147 @@ impl EMmcHost {
         response.raw[2] = self.read_reg(EMMC_RESPONSE + 8);
         response.raw[3] = self.read_reg(EMMC_RESPONSE + 12);
         response
+    }
+
+    // Send CMD0 to reset the card
+    pub fn mmc_go_idle(&self)  -> Result<(), SdError>{
+
+        let cmd = EMmcCommand::new(MMC_GO_IDLE_STATE, 0, MMC_RSP_NONE);
+        self.send_command(&cmd)?;
+
+        delay_us(10000);
+
+        info!("eMMC reset complete");
+        Ok(())
+    }
+    
+    // Send CMD1 to set OCR and check if card is ready
+    pub fn mmc_send_op_cond(&mut self, ocr: u32, mut retry: u32) -> Result<(), SdError> {
+        // First command to get capabilities
+        let mut cmd = EMmcCommand::new(MMC_SEND_OP_COND, ocr, MMC_RSP_R3);
+        self.send_command(&cmd)?;
+        delay_us(10000);
+        
+        // Get response and store it
+        let response = self.get_response().as_r3();
+        {
+            let card = self.card.as_mut().unwrap();
+            card.ocr = response;
+        }
+        
+        info!("eMMC first CMD1 response (no args): {:#x}", response);
+        
+        // Calculate arg for next commands
+        let ocr_hcs = 0x40000000; // High Capacity Support
+        let ocr_busy = 0x80000000;
+        let ocr_voltage_mask = 0x007FFF80;
+        let ocr_access_mode = 0x60000000;
+        
+        // Get card OCR for calculation
+        let card_ocr;
+        {
+            card_ocr = self.card.as_ref().unwrap().ocr;
+        }
+        
+        let cmd_arg = ocr_hcs | (self.voltages & (card_ocr & ocr_voltage_mask)) | 
+                        (card_ocr & ocr_access_mode);
+
+        info!("eMMC CMD1 arg for retries: {:#x}", cmd_arg);
+        
+        // Now retry with the proper argument until ready or timeout
+        let mut ready = false;
+        while retry > 0 && !ready {
+            cmd = EMmcCommand::new(MMC_SEND_OP_COND, cmd_arg, MMC_RSP_R3);
+            self.send_command(&cmd)?;
+            let resp = self.get_response().as_r3();
+
+            info!("CMD1 response raw: {:#x}", self.read_reg(EMMC_RESPONSE));
+            info!("eMMC CMD1 response: {:#x}", resp);
+            
+            // Update card OCR
+            {
+                let card = self.card.as_mut().unwrap();
+                card.ocr = resp;
+                
+                // Check if card is ready (OCR_BUSY flag set)
+                if (resp & ocr_busy) != 0 {
+                    ready = true;
+                    if (resp & ocr_hcs) != 0 {
+                        card.card_type = CardType::MmcHc;
+                        card.state |= MMC_STATE_HIGHCAPACITY;
+                    }
+                }
+            }
+            
+            if !ready {
+                retry -= 1;
+                // Delay between retries
+                delay_us(1000);
+            }
+        }
+        
+        info!("eMMC initialization status: {}", ready);
+        
+        if !ready {
+            return Err(SdError::UnsupportedCard);
+        }
+        
+        delay_us(1000);
+        
+        debug!("Clock control before CMD2: 0x{:x}, stable: {}", 
+            self.read_reg16(EMMC_CLOCK_CONTROL),
+            self.is_clock_stable());
+        
+        Ok(())
+    }
+    
+    // Send CMD2 to get CID
+    pub fn mmc_all_send_cid(&mut self) -> Result<(), SdError> {
+        let cmd = EMmcCommand::new(MMC_ALL_SEND_CID, 0, MMC_RSP_R2);
+        self.send_command(&cmd)?;
+        let response = self.get_response();
+
+        // Now borrow card as mutable to update it
+        let card = self.card.as_mut().unwrap();
+        card.cid = response.as_r2();
+
+        info!("eMMC Card CID: 0x{:x} 0x{:x} 0x{:x} 0x{:x}", 
+            response.as_r2()[0], response.as_r2()[1], 
+            response.as_r2()[2], response.as_r2()[3]);
+
+        Ok(())
+    }
+
+    // Send CMD3 to set RCA for eMMC
+    pub fn mmc_set_relative_addr(&self) -> Result<(), SdError> {
+        // Get the RCA value before borrowing the card
+        let rca = self.card.as_ref().unwrap().rca;
+
+        let cmd = EMmcCommand::new(MMC_SET_RELATIVE_ADDR, rca << 16, MMC_RSP_R1);
+        self.send_command(&cmd)?;
+
+        info!("cmd3 0x{:x}", self.get_response().as_r1());
+
+        Ok(())
+    }
+
+    // Send CMD9 to get CSD
+    pub fn mmc_send_csd(&mut self) -> Result<(), SdError> {
+        // Get the RCA value before borrowing the card
+        let rca = self.card.as_ref().unwrap().rca;
+        
+        let cmd = EMmcCommand::new(MMC_SEND_CSD, rca << 16, MMC_RSP_R2);
+        self.send_command(&cmd)?;
+        let response = self.get_response();
+        
+        // Now borrow card as mutable to update it
+        let card = self.card.as_mut().unwrap();
+        card.csd = response.as_r2();
+
+        info!("eMMC Card CSD: 0x{:x} 0x{:x} 0x{:x} 0x{:x}",
+            response.as_r2()[0], response.as_r2()[1], 
+            response.as_r2()[2], response.as_r2()[3]);
+
+        Ok(())
     }
 }

@@ -1,6 +1,5 @@
 use super::constant::RK_RXCLK_NO_INVERTER;
 
-// 在mod.rs或适当的文件中添加结构体定义
 #[derive(Debug, Clone, Copy)]
 pub struct EMmcChipConfig {
     pub flags: u32,

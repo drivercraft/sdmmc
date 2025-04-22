@@ -1,11 +1,11 @@
 // ===== Block Device Interface =====
 
 use core::sync::atomic::{AtomicBool, Ordering};
-use log::debug;
+use aux::MMC_VERSION_UNKNOWN;
 
 use crate::err::SdError;
 
-use super::{cmd::EMmcCommand, constant::*, CardType, EMmcHost};
+use super::{aux, cmd::EMmcCommand, constant::*, CardType, EMmcHost};
 
 // Simple block device trait that could be used by a filesystem\
 #[allow(unused)]
@@ -20,7 +20,6 @@ pub trait BlockDevice {
 // EMmc Card structure
 #[derive(Debug)]
 pub struct EMmcCard {
-    base_addr: usize,
     pub card_type: CardType,
     pub rca: u32,
     pub ocr: u32,
@@ -31,6 +30,12 @@ pub struct EMmcCard {
     pub capacity_blocks: u64,
     pub initialized: AtomicBool,
 
+    pub version: u32,
+    pub dsr: u32,
+    pub timing: u32,
+    pub clock: u32,
+    pub bus_width: u8,
+
     // 扩展CSD相关字段
     pub ext_csd_rev: u8,
     pub ext_csd_sectors: u64,
@@ -38,9 +43,8 @@ pub struct EMmcCard {
 }
 
 impl EMmcCard {
-    pub fn init(base_addr: usize, card_type: CardType) -> Self {
+    pub fn init(card_type: CardType) -> Self {
         Self {
-            base_addr,
             card_type,
             rca: 0,
             ocr: 0,
@@ -50,6 +54,13 @@ impl EMmcCard {
             block_size: 0,
             capacity_blocks: 0,
             initialized: AtomicBool::new(false),
+
+            version: MMC_VERSION_UNKNOWN,
+            dsr: 0xffffffff,
+            timing: MMC_TIMING_LEGACY,
+            clock: 0,
+            bus_width: 0,
+
             ext_csd_rev: 0,
             ext_csd_sectors: 0,
             hs_max_dtr: 0,
@@ -58,6 +69,10 @@ impl EMmcCard {
 }
 
 impl EMmcHost {
+    pub fn add_card(&mut self, card: EMmcCard) {
+        self.card = Some(card);
+    }
+
     // Read a block from the card
     pub fn read_block(&self, block_addr: u32, buffer: &mut [u8]) -> Result<(), SdError> {
         if buffer.len() != 512 {

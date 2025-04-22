@@ -265,10 +265,6 @@ pub const EMMC_CAN_DO_8BIT: u32 = 0x00040000; // 支持8位数据总线位掩码
 pub const EXT_CSD_BUS_WIDTH: u8 = 183;      // 总线宽度索引
 pub const EXT_CSD_HS_TIMING: u8 = 185;      // 高速时序索引
 
-pub const EXT_CSD_BUS_WIDTH_1: u8 = 0;      // 1位模式
-pub const EXT_CSD_BUS_WIDTH_4: u8 = 1;      // 4位模式
-pub const EXT_CSD_BUS_WIDTH_8: u8 = 2;      // 8位模式
-
 pub const EMMC_CAP_SDR104: u32 = 1 << 1;
 pub const EMMC_DATA_AVAILABLE: u32 = 1 << 11;
 
@@ -335,6 +331,28 @@ pub const MMC_TIMING_MMC_HS200: u32 = 9;
 pub const MMC_TIMING_MMC_HS400: u32 = 10;
 pub const MMC_TIMING_MMC_HS400ES: u32 = 11;
 
+pub const SDHCI_CTRL_UHS_MASK: u16 = 0x0007;
+pub const SDHCI_CTRL_UHS_SDR12: u16 = 0x0000;
+pub const SDHCI_CTRL_UHS_SDR25: u16 = 0x0001;
+pub const SDHCI_CTRL_UHS_SDR50: u16 = 0x0002;
+pub const SDHCI_CTRL_UHS_SDR104: u16 = 0x0003;
+pub const SDHCI_CTRL_UHS_DDR50: u16 = 0x0004;
+pub const SDHCI_CTRL_HS400: u16 = 0x0005;
+pub const SDHCI_CTRL_VDD_180: u16 = 0x0008;
+pub const SDHCI_CTRL_DRV_TYPE_MAS: u16 = 0x0030;
+pub const SDHCI_CTRL_DRV_TYPE_B: u16 = 0x0000;
+pub const SDHCI_CTRL_DRV_TYPE_A: u16 = 0x0010;
+pub const SDHCI_CTRL_DRV_TYPE_C: u16 = 0x0020;
+pub const SDHCI_CTRL_DRV_TYPE_D: u16 = 0x0030;
+pub const SDHCI_CTRL_EXEC_TUNING: u16 = 0x0040;
+pub const SDHCI_CTRL_TUNED_CLK: u16 = 0x0080;
+pub const SDHCI_CTRL_PRESET_VAL_ENABLE: u16 = 0x8000;
+
+pub const MMC_HIGH_26_MAX_DTR: u32 = 26000000;
+pub const MMC_HIGH_52_MAX_DTR: u32 = 52000000;
+pub const MMC_HIGH_DDR_MAX_DTR: u32 = 52000000;
+pub const MMC_HS200_MAX_DTR: u32 = 200000000;
+
 // 错误中断状态位
 pub const EMMC_INT_ERR_CMD_TIMEOUT: u32 = 0x0001;
 pub const EMMC_INT_ERR_CMD_CRC: u32 = 0x0002;
@@ -361,25 +379,116 @@ pub const EMMC_CAN_VDD_330: u32 = 1 << 24;
 pub const EMMC_CAN_VDD_300: u32 = 1 << 25;
 pub const EMMC_CAN_VDD_180: u32 = 1 << 26;
 
-pub const MMC_VDD_165_195: usize = 0x00000080;	/* VDD voltage 1.65 - 1.95 */
-pub const MMC_VDD_20_21: usize = 0x00000100;	/* VDD voltage 2.0 ~ 2.1 */
-pub const MMC_VDD_21_22: usize = 0x00000200;	/* VDD voltage 2.1 ~ 2.2 */
-pub const MMC_VDD_22_23: usize = 0x00000400;	/* VDD voltage 2.2 ~ 2.3 */
-pub const MMC_VDD_23_24: usize = 0x00000800;	/* VDD voltage 2.3 ~ 2.4 */
-pub const MMC_VDD_24_25: usize = 0x00001000;	/* VDD voltage 2.4 ~ 2.5 */
-pub const MMC_VDD_25_26: usize = 0x00002000;	/* VDD voltage 2.5 ~ 2.6 */
-pub const MMC_VDD_26_27: usize = 0x00004000;	/* VDD voltage 2.6 ~ 2.7 */
-pub const MMC_VDD_27_28: usize = 0x00008000;	/* VDD voltage 2.7 ~ 2.8 */
-pub const MMC_VDD_28_29: usize = 0x00010000;	/* VDD voltage 2.8 ~ 2.9 */
-pub const MMC_VDD_29_30: usize = 0x00020000;	/* VDD voltage 2.9 ~ 3.0 */
-pub const MMC_VDD_30_31: usize = 0x00040000;	/* VDD voltage 3.0 ~ 3.1 */
-pub const MMC_VDD_31_32: usize = 0x00080000;	/* VDD voltage 3.1 ~ 3.2 */
-pub const MMC_VDD_32_33: usize = 0x00100000;	/* VDD voltage 3.2 ~ 3.3 */
-pub const MMC_VDD_33_34: usize = 0x00200000;	/* VDD voltage 3.3 ~ 3.4 */
-pub const MMC_VDD_34_35: usize = 0x00400000;	/* VDD voltage 3.4 ~ 3.5 */
-pub const MMC_VDD_35_36: usize = 0x00800000;	/* VDD voltage 3.5 ~ 3.6 */
+pub const MMC_VDD_165_195_SHIFT: u32 = 7;	
+pub const MMC_VDD_165_195: u32 = 0x00000080;	/* VDD voltage 1.65 - 1.95 */
+pub const MMC_VDD_20_21: u32 = 0x00000100;	/* VDD voltage 2.0 ~ 2.1 */
+pub const MMC_VDD_21_22: u32 = 0x00000200;	/* VDD voltage 2.1 ~ 2.2 */
+pub const MMC_VDD_22_23: u32 = 0x00000400;	/* VDD voltage 2.2 ~ 2.3 */
+pub const MMC_VDD_23_24: u32 = 0x00000800;	/* VDD voltage 2.3 ~ 2.4 */
+pub const MMC_VDD_24_25: u32 = 0x00001000;	/* VDD voltage 2.4 ~ 2.5 */
+pub const MMC_VDD_25_26: u32 = 0x00002000;	/* VDD voltage 2.5 ~ 2.6 */
+pub const MMC_VDD_26_27: u32 = 0x00004000;	/* VDD voltage 2.6 ~ 2.7 */
+pub const MMC_VDD_27_28: u32 = 0x00008000;	/* VDD voltage 2.7 ~ 2.8 */
+pub const MMC_VDD_28_29: u32 = 0x00010000;	/* VDD voltage 2.8 ~ 2.9 */
+pub const MMC_VDD_29_30: u32 = 0x00020000;	/* VDD voltage 2.9 ~ 3.0 */
+pub const MMC_VDD_30_31: u32 = 0x00040000;	/* VDD voltage 3.0 ~ 3.1 */
+pub const MMC_VDD_31_32: u32 = 0x00080000;	/* VDD voltage 3.1 ~ 3.2 */
+pub const MMC_VDD_32_33: u32 = 0x00100000;	/* VDD voltage 3.2 ~ 3.3 */
+pub const MMC_VDD_33_34: u32 = 0x00200000;	/* VDD voltage 3.3 ~ 3.4 */
+pub const MMC_VDD_34_35: u32 = 0x00400000;	/* VDD voltage 3.4 ~ 3.5 */
+pub const MMC_VDD_35_36: u32 = 0x00800000;	/* VDD voltage 3.5 ~ 3.6 */
+
+pub const MMC_SWITCH_MODE_CMD_SET: u32 = 0x00; /* Change the command set */
+pub const MMC_SWITCH_MODE_SET_BITS: u32 = 0x01; /* Set bits in EXT_CSD byte
+						addressed by index which are
+						1 in value field */
+pub const MMC_SWITCH_MODE_CLEAR_BITS: u32 = 0x02;/* Clear bits in EXT_CSD byte
+						addressed by index, which are
+						1 in value field */
+pub const MMC_SWITCH_MODE_WRITE_BYTE: u32 = 0x03; /* Set target byte to value */
+
+pub const MMC_STATUS_MASK: u32 = !0x0206BF7F;
+pub const MMC_STATUS_SWITCH_ERROR: u32 = 1 << 7;
+pub const MMC_STATUS_RDY_FOR_DATA: u32 = 1 << 8;
+pub const MMC_STATUS_CURR_STATE: u32 = 0xf << 9;
+pub const MMC_STATUS_ERROR: u32 = 1 << 19;
+
+pub const MMC_STATE_PRG: u32 = 7 << 9;
 
 pub const EMMC_POWER_ON: u8 = 0x01;
 pub const EMMC_POWER_180: u8= 0x0A;
 pub const EMMC_POWER_300: u8= 0x0C;
 pub const EMMC_POWER_330: u8= 0x0E;
+
+pub const OCR_BUSY: u32 = 0x80000000;
+pub const OCR_HCS: u32 = 0x40000000;
+pub const OCR_VOLTAGE_MAS: u32 = 0x007FFF80;
+pub const OCR_ACCESS_MODE: u32 = 0x60000000;
+
+/* Maximum block size for MMC */
+pub const MMC_MAX_BLOCK_LEN: u32 = 512;
+
+pub const MMCPART_NOAVAILABLE: u32 = 0xff;
+pub const PART_ACCESS_MASK: u32 = 0x7;
+pub const PART_SUPPORT: u32 = 0x1;
+pub const ENHNCD_SUPPORT: u32 = 0x2;
+pub const PART_ENH_ATTRIB: u32 = 0x1f;
+
+pub const EXT_CSD_CMD_SET_NORMAL: u8 = 1 << 0;
+pub const EXT_CSD_CMD_SET_SECURE: u8 = 1 << 1;
+pub const EXT_CSD_CMD_SET_CPSECURE: u8 = 1 << 2;
+
+pub const EXT_CSD_TIMING_BC: u8 = 0;	/* Backwards compatility */
+pub const EXT_CSD_TIMING_HS: u8 = 1;	/* High speed */
+pub const EXT_CSD_TIMING_HS200: u8 = 2;	/* HS200 */
+pub const EXT_CSD_TIMING_HS400: u8 = 3;	/* HS400 */
+pub const EXT_CSD_DRV_STR_SHIFT: u8 = 4;	/* Driver Strength shift */
+
+pub const EXT_CSD_BUS_WIDTH_1: u32 = 0;	/* Card is in 1 bit mode */
+pub const EXT_CSD_BUS_WIDTH_4: u32 = 1;	/* Card is in 4 bit mode */
+pub const EXT_CSD_BUS_WIDTH_8: u32 = 2;	/* Card is in 8 bit mode */
+pub const EXT_CSD_DDR_BUS_WIDTH_4: u32 = 5;	/* Card is in 4 bit DDR mode */
+pub const EXT_CSD_DDR_BUS_WIDTH_8: u32 = 6;	/* Card is in 8 bit DDR mode */
+pub const EXT_CSD_BUS_WIDTH_STROBE: u32 = 1 << 7; /* Enhanced strobe mode */
+
+/* frequency bases */
+/* divided by 10 to be nice to platforms without floating point */
+pub const FBASE: [usize; 4] = [
+    10000,
+    100000,
+    1000000,
+    10000000,
+];
+
+/* Multiplier values for TRAN_SPEED.  Multiplied by 10 to be nice
+* to platforms without floating point.
+*/
+pub const MULTIPLIERS: [u8; 16] = [
+    0,	/* reserved */
+    10,
+    12,
+    13,
+    15,
+    20,
+    25,
+    30,
+    35,
+    40,
+    45,
+    50,
+    55,
+    60,
+    70,
+    80,
+];
+
+/*
+ * quirks
+ */
+pub const SDHCI_QUIRK_32BIT_DMA_ADDR: u32 = (1 << 0);
+pub const SDHCI_QUIRK_REG32_RW: u32 = (1 << 1);
+pub const SDHCI_QUIRK_BROKEN_R1B: u32 = (1 << 2);
+pub const SDHCI_QUIRK_NO_HISPD_BIT: u32 = (1 << 3);
+pub const SDHCI_QUIRK_BROKEN_VOLTAGE: u32 = (1 << 4);
+pub const SDHCI_QUIRK_WAIT_SEND_CMD: u32 = (1 << 6);
+pub const SDHCI_QUIRK_USE_WIDE8: u32 = (1 << 8);

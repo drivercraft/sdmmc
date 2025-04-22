@@ -91,7 +91,7 @@ pub struct RK3568Cru {
 
 /// RK3568 时钟驱动
 pub struct RK3568ClkPriv {
-    cru: *mut RK3568Cru,
+    cru: usize,
 }
 
 impl fmt::Display for RK3568Error {
@@ -109,14 +109,14 @@ impl RK3568ClkPriv {
     pub unsafe fn new(cru_ptr: *mut RK3568Cru) -> Self {
         // cru的基地址
         Self {
-            cru: cru_ptr,
+            cru: cru_ptr as usize,
         }
     }
 
     /// 获取当前eMMC时钟频率
     pub fn emmc_get_clk(&self) -> Result<u64, RK3568Error> {
         // 安全地读取寄存器
-        let con = unsafe { read_volatile(&(*self.cru).clksel_con[28]) };
+        let con = unsafe { read_volatile(&(*((self.cru) as *mut RK3568Cru)).clksel_con[28]) };
         
         // 提取时钟选择位
         let sel = (con & CCLK_EMMC_SEL_MASK) >> CCLK_EMMC_SEL_SHIFT;
@@ -134,8 +134,8 @@ impl RK3568ClkPriv {
     }
     
     /// 设置eMMC时钟频率
-    pub fn emmc_set_clk(&mut self, rate: u64) -> Result<u64, RK3568Error> {
-        debug!("cru = {:p}, rate = {}", self.cru, rate);
+    pub fn emmc_set_clk(&self, rate: u64) -> Result<u64, RK3568Error> {
+        debug!("cru = {}, rate = {}", self.cru, rate);
         
         // 根据请求的频率选择对应的时钟源
         let src_clk = match rate {
@@ -149,7 +149,7 @@ impl RK3568ClkPriv {
         };
         
         unsafe {
-            let addr = &mut (*self.cru).clksel_con[28];
+            let addr = &mut (*((self.cru) as *mut RK3568Cru)).clksel_con[28];
 
             self.rk_clrsetreg(
                 addr,
@@ -165,7 +165,7 @@ impl RK3568ClkPriv {
     /// 获取当前 eMMC 总线时钟频率
     pub fn emmc_get_bclk(&self) -> Result<u64, RK3568Error> {
         // 安全地读取寄存器
-        let con = unsafe { read_volatile(&(*self.cru).clksel_con[28]) };
+        let con = unsafe { read_volatile(&(*((self.cru) as *mut RK3568Cru)).clksel_con[28]) };
         
         // 提取时钟选择位
         let sel = (con & BCLK_EMMC_SEL_MASK) >> BCLK_EMMC_SEL_SHIFT;
@@ -193,7 +193,7 @@ impl RK3568ClkPriv {
         
         unsafe {
             // 读取-修改-写入操作
-            let addr = &mut (*self.cru).clksel_con[28];
+            let addr = &mut (*((self.cru) as *mut RK3568Cru)).clksel_con[28];
 
             self.rk_clrsetreg(
                 addr,
@@ -251,13 +251,13 @@ impl RK3568ClkPriv {
         let raw_value = unsafe {
             match clk.id {
                 RK3568MmcClockId::SclkEmmcSample => 
-                    read_volatile(&(*self.cru).emmc_con[1]),
+                    read_volatile(&(*((self.cru) as *mut RK3568Cru)).emmc_con[1]),
                 RK3568MmcClockId::SclkSdmmc0Sample => 
-                    read_volatile(&(*self.cru).sdmmc0_con[1]),
+                    read_volatile(&(*((self.cru) as *mut RK3568Cru)).sdmmc0_con[1]),
                 RK3568MmcClockId::SclkSdmmc1Sample => 
-                    read_volatile(&(*self.cru).sdmmc1_con[1]),
+                    read_volatile(&(*((self.cru) as *mut RK3568Cru)).sdmmc1_con[1]),
                 RK3568MmcClockId::SclkSdmmc2Sample => 
-                    read_volatile(&(*self.cru).sdmmc2_con[1]),
+                    read_volatile(&(*((self.cru) as *mut RK3568Cru)).sdmmc2_con[1]),
             }
         };
         
@@ -316,13 +316,13 @@ impl RK3568ClkPriv {
         unsafe {
             let addr = match clk.id {
                 RK3568MmcClockId::SclkEmmcSample => 
-                    &mut (*self.cru).emmc_con[1],
+                    &mut (*((self.cru) as *mut RK3568Cru)).emmc_con[1],
                 RK3568MmcClockId::SclkSdmmc0Sample => 
-                    &mut (*self.cru).sdmmc0_con[1],
+                    &mut (*((self.cru) as *mut RK3568Cru)).sdmmc0_con[1],
                 RK3568MmcClockId::SclkSdmmc1Sample => 
-                    &mut (*self.cru).sdmmc1_con[1],
+                    &mut (*((self.cru) as *mut RK3568Cru)).sdmmc1_con[1],
                 RK3568MmcClockId::SclkSdmmc2Sample => 
-                    &mut (*self.cru).sdmmc2_con[1],
+                    &mut (*((self.cru) as *mut RK3568Cru)).sdmmc2_con[1],
             };
             write_volatile(addr, raw_value | 0xffff0000);
         }
@@ -341,4 +341,43 @@ impl RK3568ClkPriv {
 /// 辅助函数: 四舍五入的除法
 fn div_round_closest(dividend: u32, divisor: u64) -> u32 {
     ((dividend as u64 + divisor / 2) / divisor) as u32
+}
+
+use spin::Mutex;
+use core::cell::UnsafeCell;
+
+static CLKRK3568_CLK: Mutex<Option<UnsafeCell<RK3568ClkPriv>>> = Mutex::new(None);
+
+pub fn init_clk(clk: usize) -> bool {
+    let clock = unsafe { RK3568ClkPriv::new(clk as *mut _) };
+    
+    let mut guard = CLKRK3568_CLK.lock();
+    if guard.is_none() {
+        *guard = Some(UnsafeCell::new(clock));
+        debug!("Clock initialized successfully");
+        true
+    } else {
+        debug!("Clock already initialized");
+        false
+    }
+}
+
+pub fn get_clk() -> Option<&'static RK3568ClkPriv> {
+    let guard = CLKRK3568_CLK.lock();
+    match &*guard {
+        Some(cell) => Some(unsafe { &*cell.get() }),
+        None => None
+    }
+}
+
+pub fn emmc_get_clk() -> Result<u64, RK3568Error> {
+    let binding = CLKRK3568_CLK.lock();
+    let clk = binding.as_ref().ok_or(RK3568Error::RegisterOperationFailed)?;
+    unsafe { (*clk.get()).emmc_get_clk() }
+}
+
+pub fn emmc_set_clk(rate: u64) -> Result<u64, RK3568Error> {
+    let binding = CLKRK3568_CLK.lock();
+    let clk = binding.as_ref().ok_or(RK3568Error::RegisterOperationFailed)?;
+    unsafe { (*clk.get()).emmc_set_clk(rate) }
 }
