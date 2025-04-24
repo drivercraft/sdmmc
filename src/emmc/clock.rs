@@ -135,7 +135,7 @@ impl RK3568ClkPriv {
     
     /// 设置eMMC时钟频率
     pub fn emmc_set_clk(&self, rate: u64) -> Result<u64, RK3568Error> {
-        debug!("cru = {}, rate = {}", self.cru, rate);
+        debug!("cru = {:#x}, rate = {}", self.cru, rate);
         
         // 根据请求的频率选择对应的时钟源
         let src_clk = match rate {

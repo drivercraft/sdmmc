@@ -42,7 +42,7 @@ impl EMmcHost {
 
         // Send SEND_STATUS command
         let cmd = EMmcCommand::new(MMC_SEND_STATUS, card.rca, MMC_RSP_R1);
-        self.send_command(&cmd)?;
+        self.send_command(&cmd, None)?;
         let response = self.get_response();
 
         Ok(response.as_r1())

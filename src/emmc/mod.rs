@@ -12,15 +12,17 @@ pub mod aux;
 pub mod clock;
 
 use core::fmt::Display;
-use aux::{MMC_VERSION_1_2, MMC_VERSION_1_4, MMC_VERSION_2_2, MMC_VERSION_3, MMC_VERSION_4, MMC_VERSION_UNKNOWN};
-use block::EMmcCard;
+use aux::{MMC_VERSION_1_2, MMC_VERSION_1_4, MMC_VERSION_2_2, MMC_VERSION_3, MMC_VERSION_4, MMC_VERSION_4_1, MMC_VERSION_4_2, MMC_VERSION_4_3, MMC_VERSION_4_41, MMC_VERSION_4_5, MMC_VERSION_5_0, MMC_VERSION_5_1, MMC_VERSION_UNKNOWN};
+use bare_test::{boot::debug, io::print};
+use block::{DataBuffer, EMmcCard};
 use clock::emmc_get_clk;
 use constant::*;
 use cmd::*;
 use info::CardType;
-use smccc::arch::Version;
-use crate::{delay_us, err::*, generic_fls};
+use crate::{delay_us, dump_memory_region, err::*, generic_fls};
 use log::{debug, info};
+
+// const MMC_MAX_BLOCK_LEN: usize = 512;
 
 // SD Host Controller structure
 #[derive(Debug)]
@@ -154,7 +156,7 @@ impl EMmcHost {
     }
 
     // Reset the controller
-    fn reset(&self, mask: u8) -> Result<(), SdError> {
+    pub fn reset(&self, mask: u8) -> Result<(), SdError> {
         // Request reset
         self.write_reg8(EMMC_SOFTWARE_RESET, mask);
 
@@ -211,13 +213,13 @@ impl EMmcHost {
         };
 
         // Send CMD2 to get CID
-        self.mmc_all_send_cid()?;
+        let _cid = self.mmc_all_send_cid()?;
 
         // Send CMD3 to get RCA
         self.mmc_set_relative_addr()?;
 
         // Send CMD9 to get CSD
-        self.mmc_send_csd()?;
+        let _csd = self.mmc_send_csd()?; 
 
         // Process card version and CSD data - use short-lived borrow
         let card = self.card.as_mut().unwrap();
@@ -262,6 +264,9 @@ impl EMmcHost {
         let tran_speed = freq * mult as usize;
         let mut capacity_user = (csize + 1) << (cmult + 2);
         capacity_user *= read_bl_len;
+        let capacity_boot = 0;
+        let capacity_rpmb = 0;
+        let capacity_gp = [0; 4];
         
         if write_bl_len > MMC_MAX_BLOCK_LEN {
             write_bl_len = MMC_MAX_BLOCK_LEN;
@@ -283,7 +288,7 @@ impl EMmcHost {
                 (card.dsr & 0xffff) << 16
             };
             let cmd4 = EMmcCommand::new(MMC_SET_DSR, dsr_value, MMC_RSP_NONE);
-            self.send_command(&cmd4)?;
+            self.send_command(&cmd4, None)?;
         }
 
         // Select card with CMD7
@@ -291,8 +296,14 @@ impl EMmcHost {
             let card = self.card.as_ref().unwrap();
             card.rca
         };
+
         let cmd7 = EMmcCommand::new(MMC_SELECT_CARD, rca << 16, MMC_RSP_R1);
-        self.send_command(&cmd7)?;
+        self.send_command(&cmd7, None)?;
+
+        debug!("cmd7: {:#x}", self.get_response().as_r1());
+
+        let erase_grp_size = 1;
+        let part_config = MMCPART_NOAVAILABLE;
 
         // Check eMMC version 4+
         let is_version_4_plus = {
@@ -303,6 +314,34 @@ impl EMmcHost {
         if is_version_4_plus {
             self.mmc_select_hs()?;
             self.mmc_set_clock(MMC_HIGH_52_MAX_DTR);
+            let mut ext_csd = [0; MMC_MAX_BLOCK_LEN as usize];
+
+            // unsafe { dump_memory_region(0xfffff000fe310000, 0x1000) };
+
+            self.mmc_send_ext_csd(&mut ext_csd)?;
+            debug!("EXT_CSD: {:?}", ext_csd);
+            // if ext_csd[EXT_CSD_REV as usize] >= 2 {
+            //     let mut capacity: u32 = (ext_csd[EXT_CSD_SEC_CNT as usize] << 0 | 
+            //         ext_csd[EXT_CSD_SEC_CNT as usize + 1] << 8 | 
+            //         ext_csd[EXT_CSD_SEC_CNT as usize + 2] << 16 | 
+            //         ext_csd[EXT_CSD_SEC_CNT as usize + 3] << 24) as u32; 
+            //     capacity *= MMC_MAX_BLOCK_LEN;
+            //     if (capacity >> 20) > 2 * 1024 {
+            //         capacity_user = capacity as u32;
+            //     }
+
+            //     let card = self.card.as_mut().unwrap();
+            //     match ext_csd[EXT_CSD_REV as usize] {
+            //         1 => card.version = MMC_VERSION_4_1,
+            //         2 => card.version = MMC_VERSION_4_2,
+            //         3 => card.version = MMC_VERSION_4_3,
+            //         5 => card.version = MMC_VERSION_4_41,
+            //         6 => card.version = MMC_VERSION_4_5,
+            //         7 => card.version = MMC_VERSION_5_0,
+            //         8 => card.version = MMC_VERSION_5_1,
+            //         _ => panic!("Unknown EXT_CSD revision"),
+            //     }
+            // }
         }
 
         info!("eMMC initialization complete");
@@ -344,19 +383,21 @@ impl EMmcHost {
         self.sdhci_set_ios();
     }
 
-    fn mmc_switch(&self, _set: u8, index: u8, value: u8) -> Result<(), SdError> {
+    fn mmc_switch(&self, _set: u8, index: u32, value: u8) -> Result<(), SdError> {
         let mut retries = 3;
         let cmd = EMmcCommand::new(MMC_SWITCH, ((MMC_SWITCH_MODE_WRITE_BYTE as u32) << 24) | ((index as u32) << 16) | ((value as u32) << 8), MMC_RSP_R1B);
 
         loop {
-            let ret = self.send_command(&cmd);
+            let ret = self.send_command(&cmd, None);
 
             if ret.is_ok() {
+                debug!("cmd6 {:#x}", self.get_response().as_r1());
                 return self.mmc_poll_for_busy(true);
             }
 
             retries -= 1;
             if retries <= 0 {
+                debug!("Switch command failed after 3 retries");
                 break;
             }
         }
@@ -372,8 +413,9 @@ impl EMmcHost {
                 todo!("Implement mmc_card_busy");
             } else {
                 let cmd = EMmcCommand::new(MMC_SEND_STATUS, self.card.as_ref().unwrap().rca << 16, MMC_RSP_R1);
-                self.send_command(&cmd)?;
+                self.send_command(&cmd, None)?;
                 let response = self.get_response().as_r1();
+                debug!("cmd_d {:#x}", response);
 
                 if response & MMC_STATUS_SWITCH_ERROR != 0 {
                     return Err(SdError::BadMessage);
@@ -399,5 +441,26 @@ impl EMmcHost {
         // This is a placeholder - actual implementation depends on your EMMC controller
         let caps = self.read_reg(EMMC_CAPABILITIES1);
         (caps & EMMC_CAN_DO_8BIT) != 0
+    }
+
+    pub fn mmc_send_ext_csd(&mut self, ext_csd: &mut [u8; MMC_MAX_BLOCK_LEN as usize]) -> Result<(), SdError> {
+        let cmd = EMmcCommand::new(MMC_SEND_EXT_CSD, 0, MMC_RSP_R1)
+            .with_data(MMC_MAX_BLOCK_LEN as u16, 1, true);
+        
+        self.send_command(&cmd, Some(DataBuffer::Read(ext_csd)))?;
+
+        for i in 0..MMC_MAX_BLOCK_LEN/4 {
+            let data = self.read_reg(EMMC_BUF_DATA);
+            
+            let idx = (i*4) as usize;
+            ext_csd[idx] = (data & 0xFF) as u8;
+            ext_csd[idx + 1] = ((data >> 8) & 0xFF) as u8;
+            ext_csd[idx + 2] = ((data >> 16) & 0xFF) as u8;
+            ext_csd[idx + 3] = ((data >> 24) & 0xFF) as u8;
+        }
+        
+        debug!("EXT_CSD read successfully, rev: {}", ext_csd[EXT_CSD_REV as usize]);
+        
+        Ok(())
     }
 }

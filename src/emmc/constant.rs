@@ -262,9 +262,6 @@ pub const MMC_STATE_HS400: u32 = 1 << 8;
 
 pub const EMMC_CAN_DO_8BIT: u32 = 0x00040000; // 支持8位数据总线位掩码
 
-pub const EXT_CSD_BUS_WIDTH: u8 = 183;      // 总线宽度索引
-pub const EXT_CSD_HS_TIMING: u8 = 185;      // 高速时序索引
-
 pub const EMMC_CAP_SDR104: u32 = 1 << 1;
 pub const EMMC_DATA_AVAILABLE: u32 = 1 << 11;
 
@@ -492,3 +489,36 @@ pub const SDHCI_QUIRK_NO_HISPD_BIT: u32 = (1 << 3);
 pub const SDHCI_QUIRK_BROKEN_VOLTAGE: u32 = (1 << 4);
 pub const SDHCI_QUIRK_WAIT_SEND_CMD: u32 = (1 << 6);
 pub const SDHCI_QUIRK_USE_WIDE8: u32 = (1 << 8);
+
+/*
+ * EXT_CSD fields
+ */
+pub const EXT_CSD_ENH_START_ADDR: u32 = 136;	/* R/W */
+pub const EXT_CSD_ENH_SIZE_MULT: u32 = 140;	/* R/W */
+pub const EXT_CSD_GP_SIZE_MULT: u32 = 143;	/* R/W */
+pub const EXT_CSD_PARTITION_SETTING: u32 = 155;	/* R/W */
+pub const EXT_CSD_PARTITIONS_ATTRIBUTE: u32 = 156;	/* R/W */
+pub const EXT_CSD_MAX_ENH_SIZE_MULT: u32 = 157;	/* R */
+pub const EXT_CSD_PARTITIONING_SUPPORT: u32 = 160;	/* RO */
+pub const EXT_CSD_RST_N_FUNCTION: u32 = 162;	/* R/W */
+pub const EXT_CSD_BKOPS_EN: u32 = 163;	/* R/W & R/W/E */
+pub const EXT_CSD_WR_REL_PARAM: u32 = 166;	/* R */
+pub const EXT_CSD_WR_REL_SET: u32 = 167;	/* R/W */
+pub const EXT_CSD_RPMB_MULT: u32 = 168;	/* RO */
+pub const EXT_CSD_ERASE_GROUP_DEF: u32 = 175;	/* R/W */
+pub const EXT_CSD_BOOT_BUS_WIDTH: u32 = 177;
+pub const EXT_CSD_PART_CONF: u32 = 179;	/* R/W */
+pub const EXT_CSD_BUS_WIDTH: u32 = 183;	/* R/W */
+pub const EXT_CSD_STROBE_SUPPORT: u32 = 184;	/* RO */
+pub const EXT_CSD_HS_TIMING: u32 = 185;	/* R/W */
+pub const EXT_CSD_REV: u32 = 192;	/* RO */
+pub const EXT_CSD_CARD_TYPE: u32 = 196;	/* RO */
+pub const EXT_CSD_DRIVER_STRENGTH: u32 = 197;	/* RO */
+pub const EXT_CSD_SEC_CNT: u32 = 212;	/* RO, 4 bytes */
+pub const EXT_CSD_HC_WP_GRP_SIZE: u32 = 221;	/* RO */
+pub const EXT_CSD_HC_ERASE_GRP_SIZE: u32 = 224;	/* RO */
+pub const EXT_CSD_BOOT_MULT: u32 = 226;	/* RO */
+pub const EXT_CSD_SEC_FEATURE_SUPPORT: u32 = 231;     /* RO */
+pub const EXT_CSD_BKOPS_SUPPORT: u32 = 502;	/* RO */
+
+pub const EXT_CSD_PARTITION_SETTING_COMPLETED: u32 = 1 << 0;

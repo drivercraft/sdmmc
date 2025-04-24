@@ -7,6 +7,12 @@ use crate::err::SdError;
 
 use super::{aux, cmd::EMmcCommand, constant::*, CardType, EMmcHost};
 
+#[derive(Debug)]
+pub enum DataBuffer<'a> {
+    Read(&'a mut [u8]),
+    Write(&'a [u8]),
+}
+
 // Simple block device trait that could be used by a filesystem\
 #[allow(unused)]
 pub trait BlockDevice {
@@ -99,7 +105,7 @@ impl EMmcHost {
         // Send READ_SINGLE_BLOCK command
         let cmd = EMmcCommand::new(MMC_READ_SINGLE_BLOCK, addr, MMC_RSP_R1)
             .with_data(512, 1, true);
-        self.send_command(&cmd)?;
+        self.send_command(&cmd, Some(DataBuffer::Read(buffer)))?;
 
         // Read data from buffer register
         self.read_buffer(buffer)?;
@@ -228,7 +234,7 @@ impl EMmcHost {
         // Send READ_MULTIPLE_BLOCK command
         let cmd = EMmcCommand::new(MMC_READ_MULTIPLE_BLOCK, addr, MMC_RSP_R1)
             .with_data(512, blocks, true);
-        self.send_command(&cmd)?;
+        self.send_command(&cmd, Some(DataBuffer::Read(buffer)))?;
 
         // Read data from buffer register
         for i in 0..blocks {
@@ -238,7 +244,7 @@ impl EMmcHost {
 
         // Send STOP_TRANSMISSION command
         let cmd = EMmcCommand::new(MMC_STOP_TRANSMISSION, 0, MMC_RSP_R1B);
-        self.send_command(&cmd)?;
+        self.send_command(&cmd, None)?;
 
         Ok(())
     }
@@ -274,7 +280,7 @@ impl EMmcHost {
         // Send WRITE_BLOCK command
         let cmd = EMmcCommand::new(MMC_WRITE_BLOCK, addr, MMC_RSP_R1)
             .with_data(512, 1, false);
-        self.send_command(&cmd)?;
+        self.send_command(&cmd, Some(DataBuffer::Write(buffer)))?;
 
         // Write data to buffer register
         self.write_buffer(buffer)?;
@@ -313,7 +319,7 @@ impl EMmcHost {
         // Send WRITE_MULTIPLE_BLOCK command
         let cmd = EMmcCommand::new(MMC_WRITE_MULTIPLE_BLOCK, addr, MMC_RSP_R1)
             .with_data(512, blocks, false);
-        self.send_command(&cmd)?;
+        self.send_command(&cmd, Some(DataBuffer::Write(buffer)))?;
 
         // Write data to buffer register
         for i in 0..blocks {
@@ -323,8 +329,32 @@ impl EMmcHost {
 
         // Send STOP_TRANSMISSION command
         let cmd = EMmcCommand::new(MMC_STOP_TRANSMISSION, 0, MMC_RSP_R1B);
-        self.send_command(&cmd)?;
+        self.send_command(&cmd, None)?;
 
+        Ok(())
+    }
+
+    // 读取数据缓冲区方法
+    pub fn read_data_buffer(&self, buffer: &mut [u8]) -> Result<(), SdError> {
+        let len = buffer.len();
+        
+        // 从数据寄存器读取数据
+        for i in 0..len {
+            buffer[i] = self.read_reg8(EMMC_BUF_DATA);
+        }
+        
+        Ok(())
+    }
+
+    // 写入数据缓冲区方法
+    pub fn write_data_buffer(&self, buffer: &[u8]) -> Result<(), SdError> {
+        let len = buffer.len();
+        
+        // 向数据寄存器写入数据
+        for i in 0..len {
+            self.write_reg8(EMMC_BUF_DATA, buffer[i]);
+        }
+        
         Ok(())
     }
 }

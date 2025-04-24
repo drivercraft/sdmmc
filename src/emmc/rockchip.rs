@@ -1,7 +1,6 @@
-use core::borrow::Borrow;
-
+use bare_test::boot::debug;
 use log::{debug, info};
-use crate::{delay_us, emmc::{aux::dll_lock_wo_tmout, clock::emmc_set_clk, config::EMmcChipConfig}, err::SdError, sdhci};
+use crate::{delay_us, emmc::{aux::dll_lock_wo_tmout, clock::emmc_set_clk, config::EMmcChipConfig}, err::SdError};
 use super::{constant::*, EMmcHost};
 
 impl EMmcHost {
@@ -154,6 +153,8 @@ impl EMmcHost {
         self.rockchip_emmc_set_clock(freq)?;
         // Disable output clock while config DLL
         self.write_reg16(EMMC_CLOCK_CONTROL, 0);
+
+        info!("EMMC Clock Control: {:#x}", self.read_reg16(EMMC_CLOCK_CONTROL));
         
         // DLL配置基于频率
         if freq >= 100_000_000 { // 100 MHz
@@ -283,6 +284,8 @@ impl EMmcHost {
             ctrl_2 |= SDHCI_CTRL_HS400 | SDHCI_CTRL_DRV_TYPE_A;
         }
 
+        debug!("EMMC Host Control 2: {:#x}", ctrl_2);
+
         self.write_reg16(EMMC_HOST_CTRL2, ctrl_2);
     }
 
@@ -319,6 +322,8 @@ impl EMmcHost {
         } else {
             ctrl &= !EMMC_CTRL_HISPD;
         }
+
+        debug!("EMMC Host Control 1: {:#x}", ctrl);
     
         self.write_reg8(EMMC_HOST_CTRL1, ctrl);
     
