@@ -1,9 +1,11 @@
+use bare_test::println;
 use log::{debug, info};
 
-use crate::{delay_us, emmc::CardType, err::SdError};
+use crate::{delay_us, dump_memory_region, emmc::CardType, err::SdError};
 
 use super::{block::DataBuffer, constant::*, EMmcHost};
 
+const EMMC_DEFAULT_BOUNDARY_ARG: u16 = 7;
 const CMD_DEFAULT_TIMEOUT: u32 = 100;
 const CMD_MAX_TIMEOUT: u32 = 500;
 
@@ -83,7 +85,8 @@ impl SdResponse {
 
 impl EMmcHost {
     // 发送命令
-    pub fn send_command(&self, cmd: &EMmcCommand, data_buffer: Option<DataBuffer>) -> Result<(), SdError> {
+    pub fn send_command(&self, cmd: &EMmcCommand, mut data_buffer: Option<DataBuffer>) -> Result<(), SdError> {
+        let mut start_addr = 0;
         // 动态超时时间配置
         let mut cmd_timeout = CMD_DEFAULT_TIMEOUT;
         
@@ -127,9 +130,6 @@ impl EMmcHost {
             "Sending command: opcode={:#x}, arg={:#x}, resp_type={:#x}",
             cmd.opcode, cmd.arg, cmd.resp_type
         );
-
-        // 设置参数
-        self.write_reg(EMMC_ARGUMENT, cmd.arg);
         
         // 设置预期中断掩码
         let mut int_mask = EMMC_INT_RESPONSE as u16;
@@ -139,17 +139,18 @@ impl EMmcHost {
             int_mask |= EMMC_INT_DATA_END as u16;
         }
 
+        if cmd.opcode == MMC_SEND_TUNING_BLOCK || cmd.opcode == MMC_SEND_TUNING_BLOCK_HS200 {
+            int_mask &= !EMMC_INT_RESPONSE as u16;
+            int_mask |= EMMC_INT_DATA_AVAIL as u16;
+        }
+
         // 设置数据传输相关寄存器
         if cmd.data_present {
-            // 设置更长的超时
             self.write_reg8(EMMC_TIMEOUT_CONTROL, 0xe);
-            
-            // 设置块大小和数量
-            self.write_reg16(EMMC_BLOCK_SIZE, cmd.block_size);
-            self.write_reg16(EMMC_BLOCK_COUNT, cmd.block_count);
 
             // 设置传输模式
             let mut mode = EMMC_TRNS_BLK_CNT_EN;
+
             if cmd.block_count > 1 {
                 mode |= EMMC_TRNS_MULTI;
             }
@@ -160,34 +161,36 @@ impl EMmcHost {
 
             // 传输模式配置
             self.write_reg16(EMMC_XFER_MODE, mode);
-            
-            // 预处理数据缓冲区
-            if let Some(buffer) = &data_buffer {
-                match (buffer, cmd.data_dir_read) {
-                    (DataBuffer::Read(_), true) => {
-                        // 读操作，不需要预处理
-                    },
-                    (DataBuffer::Write(write_buf), false) => {
-                        // 写操作，准备数据
-                        if cmd.data_dir_read {
-                            return Err(SdError::InvalidArgument); // 缓冲区类型与操作类型不匹配
-                        }
-                        
-                        // 对于多块写入，仅准备第一块数据
-                        // 其余数据将在命令执行后写入
-                        if cmd.block_count == 1 {
-                            self.write_data_buffer(write_buf)?;
-                        }
-                    },
-                    _ => return Err(SdError::InvalidArgument), // 缓冲区类型与操作类型不匹配
-                }
-            } else if cmd.data_present {
-                return Err(SdError::InvalidArgument); // 需要缓冲区但未提供
+
+            match data_buffer {
+                Some(DataBuffer::Read(ref read_buf)) if cmd.data_dir_read => {
+                    let ptr = read_buf.as_ptr() as usize;
+                    start_addr = ptr as u32;
+
+                    // 设置DMA地址寄存器
+                    self.write_reg(EMMC_SDMASA, start_addr);
+                },
+                Some(DataBuffer::Write(write_buf)) if !cmd.data_dir_read => {
+                    let ptr = write_buf.as_ptr() as usize;
+                    start_addr = ptr as u32;
+                    self.write_reg(EMMC_SDMASA, start_addr);
+                },
+                _ => return Err(SdError::InvalidArgument),
             }
+            
+            mode |= EMMC_TRNS_DMA;
+
+            // 设置块大小和数量
+            self.write_reg16(EMMC_BLOCK_SIZE, (((EMMC_DEFAULT_BOUNDARY_ARG & 0x7) << 12) | (cmd.block_size & 0xFFF)).try_into().unwrap());
+            self.write_reg16(EMMC_BLOCK_COUNT, cmd.block_count);
+            self.write_reg16(EMMC_XFER_MODE, mode);
         } else if cmd.resp_type & MMC_RSP_BUSY != 0 {
             // 对于带BUSY的命令，但没有数据的情况，仍然设置超时控制
             self.write_reg8(EMMC_TIMEOUT_CONTROL, 0xe);
         }
+
+        // 设置参数
+        self.write_reg(EMMC_ARGUMENT, cmd.arg);
 
         // 设置命令寄存器
         let mut command = (cmd.opcode as u16) << 8;
@@ -216,9 +219,6 @@ impl EMmcHost {
         }
 
         info!("Sending command: {:#x}", command);
-
-        // 发送命令
-        self.write_reg16(EMMC_COMMAND, command);
         
         // 特殊命令特殊处理
         // 使用更长的超时时间进行初始化命令
@@ -227,15 +227,17 @@ impl EMmcHost {
         } else {
             CMD_DEFAULT_TIMEOUT
         };
-        
+
+        // 发送命令
+        self.write_reg16(EMMC_COMMAND, command);
+
         // 等待命令完成
         let mut status: u16;
         
         loop {
             status = self.read_reg16(EMMC_NORMAL_INT_STAT);
-            
             info!("Response Status: {:#b}", status);
-            
+
             // 检查错误
             if status & EMMC_INT_ERROR as u16 != 0 {
                 break;
@@ -277,173 +279,38 @@ impl EMmcHost {
             
             // 映射具体错误类型
             let err = if err_status & 0x1 != 0 {
-                SdError::Timeout
-            } else if err_status & 0x2 != 0 {
-                SdError::Crc
-            } else if err_status & 0x4 != 0 {
-                SdError::EndBit
-            } else if err_status & 0x8 != 0 {
-                SdError::Index
-            } else if err_status & 0x10 != 0 {
-                SdError::DataTimeout
-            } else if err_status & 0x20 != 0 {
-                SdError::DataCrc
-            } else if err_status & 0x40 != 0 {
-                SdError::DataEndBit
-            } else if err_status & 0x80 != 0 {
-                SdError::CurrentLimit
-            } else {
-                SdError::CommandError
-            };
+                    SdError::Timeout
+                } else if err_status & 0x2 != 0 {
+                    SdError::Crc
+                } else if err_status & 0x4 != 0 {
+                    SdError::EndBit
+                } else if err_status & 0x8 != 0 {
+                    SdError::Index
+                } else if err_status & 0x10 != 0 {
+                    SdError::DataTimeout
+                } else if err_status & 0x20 != 0 {
+                    SdError::DataCrc
+                } else if err_status & 0x40 != 0 {
+                    SdError::DataEndBit
+                } else if err_status & 0x80 != 0 {
+                    SdError::CurrentLimit
+                } else {
+                    SdError::CommandError
+                };
             
             return Err(err);
         }
-        
+
         // 处理数据传输部分（如果有的话）
         if cmd.data_present {
-            info!("Data transfer: block_size={}, block_count={}", 
-                cmd.block_size, cmd.block_count);
-            if let Some(buffer) = data_buffer {
-                match (buffer, cmd.data_dir_read) {
-                    (DataBuffer::Read(read_buf), true) => {
-                        // 等待数据准备好
-                        let mut data_timeout = CMD_DEFAULT_TIMEOUT;
-                        debug!("Waiting for data to be ready...");
-                        loop {
-                            status = self.read_reg16(EMMC_NORMAL_INT_STAT);
-
-                            info!("Data Status: {:#b}", status);
-                            
-                            // 检查数据传输完成
-                            if status & EMMC_INT_DATA_END as u16 != 0 {
-                                info!("Data transfer completed: status={:#b}", status);
-                                self.write_reg16(EMMC_NORMAL_INT_STAT, EMMC_INT_DATA_END as u16);
-                                
-                                // 读取数据
-                                self.read_data_buffer(read_buf)?;
-                                
-                                break;
-                            }
-                            
-                            // 检查数据错误
-                            if status & EMMC_INT_ERROR as u16 != 0 {
-                                let err_status = self.read_reg16(EMMC_ERROR_INT_STAT);
-                                info!("Data error: status={:#b}, err_status={:#b}", status, err_status);
-                                
-                                self.reset_data()?;
-                                
-                                let err = if err_status & 0x10 != 0 {
-                                    SdError::DataTimeout
-                                } else if err_status & 0x20 != 0 {
-                                    SdError::DataCrc
-                                } else if err_status & 0x40 != 0 {
-                                    SdError::DataEndBit
-                                } else {
-                                    SdError::DataError
-                                };
-                                
-                                return Err(err);
-                            }
-                            
-                            // 检查超时
-                            if data_timeout <= 0 {
-                                info!("Data timeout");
-                                self.reset_data()?;
-                                return Err(SdError::DataTimeout);
-                            }
-                            
-                            data_timeout -= 1;
-                            delay_us(100000);
-                        }
-                    },
-                    (DataBuffer::Write(write_buf), false) => {
-                        // 对于多块写入，写入剩余的块
-                        if cmd.block_count > 1 {
-                            let block_size = cmd.block_size as usize;
-                            
-                            // 第一块已经在命令之前写入
-                            // 写入剩余的块
-                            for i in 0..cmd.block_count {
-                                let start = i as usize * block_size;
-                                let end = start + block_size;
-                                
-                                if end <= write_buf.len() {
-                                    // 等待缓冲区准备好接收数据
-                                    let mut buffer_ready_timeout = CMD_DEFAULT_TIMEOUT;
-                                    
-                                    while (self.read_reg16(EMMC_NORMAL_INT_STAT)) == 0 {
-                                        if buffer_ready_timeout <= 0 {
-                                            info!("Buffer write ready timeout");
-                                            self.reset_data()?;
-                                            return Err(SdError::DataTimeout);
-                                        }
-                                        
-                                        buffer_ready_timeout -= 1;
-                                        delay_us(100);
-                                    }
-                                    
-                                    // // 清除缓冲区就绪中断
-                                    // self.write_reg16(EMMC_NORMAL_INT_STAT,  as u16);
-                                    
-                                    // 写入数据块
-                                    self.write_data_buffer(&write_buf[start..end])?;
-                                }
-                            }
-                        }
-                        
-                        // 等待数据传输完成
-                        let mut data_timeout = CMD_DEFAULT_TIMEOUT;
-                        
-                        loop {
-                            status = self.read_reg16(EMMC_NORMAL_INT_STAT);
-                            
-                            // 检查数据传输完成
-                            if status & EMMC_INT_DATA_END as u16 != 0 {
-                                info!("Data transfer completed: status={:#b}", status);
-                                self.write_reg16(EMMC_NORMAL_INT_STAT, EMMC_INT_DATA_END as u16);
-                                break;
-                            }
-                            
-                            // 检查数据错误
-                            if status & EMMC_INT_ERROR as u16 != 0 {
-                                let err_status = self.read_reg16(EMMC_ERROR_INT_STAT);
-                                info!("Data error: status={:#b}, err_status={:#b}", status, err_status);
-                                
-                                self.reset_data()?;
-                                
-                                let err = if err_status & 0x10 != 0 {
-                                    SdError::DataTimeout
-                                } else if err_status & 0x20 != 0 {
-                                    SdError::DataCrc
-                                } else if err_status & 0x40 != 0 {
-                                    SdError::DataEndBit
-                                } else {
-                                    SdError::DataError
-                                };
-                                
-                                return Err(err);
-                            }
-                            
-                            // 检查超时
-                            if data_timeout <= 0 {
-                                info!("Data timeout");
-                                self.reset_data()?;
-                                return Err(SdError::DataTimeout);
-                            }
-                            
-                            data_timeout -= 1;
-                            delay_us(100000);
-                        }
-                    },
-                    _ => return Err(SdError::InvalidArgument), // 缓冲区类型与操作类型不匹配
-                }
+            debug!("Data transfer: cmd.data_present={}", cmd.data_present);
+            if let Some(buffer) = &mut data_buffer {
+                self.transfer_data(cmd.data_dir_read, cmd.block_size, cmd.block_count, buffer)?;
             } else {
-                // 无缓冲区但有数据传输，返回错误
                 return Err(SdError::InvalidArgument);
             }
         }
-        
-        // 成功完成，复位命令和数据线以准备下一个命令
+
         self.reset(EMMC_RESET_CMD)?;
         self.reset(EMMC_RESET_DATA)?;
         

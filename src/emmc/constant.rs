@@ -189,7 +189,8 @@ pub const MMC_BUSTEST_W: u8 = 19;
 pub const MMC_SET_BLOCKLEN: u8 = 16;
 pub const MMC_READ_SINGLE_BLOCK: u8 = 17;
 pub const MMC_READ_MULTIPLE_BLOCK: u8 = 18;
-pub const MMC_SEND_TUNING_BLOCK: u8 = 21;
+pub const MMC_SEND_TUNING_BLOCK: u8 = 19;
+pub const MMC_SEND_TUNING_BLOCK_HS200: u8 = 21;
 
 // Block-oriented write commands (class 4)
 pub const MMC_SET_BLOCK_COUNT: u8 = 23;
@@ -264,6 +265,7 @@ pub const EMMC_CAN_DO_8BIT: u32 = 0x00040000; // 支持8位数据总线位掩码
 
 pub const EMMC_CAP_SDR104: u32 = 1 << 1;
 pub const EMMC_DATA_AVAILABLE: u32 = 1 << 11;
+pub const EMMC_SPACE_AVAILABLE: u32 = 1 << 10;
 
 pub const DWCMSHC_HOST_CTRL3: u32 = 0x508;
 pub const DWCMSHC_EMMC_CONTROL: u32 = 0x52c;

@@ -2,10 +2,14 @@
 
 use core::sync::atomic::{AtomicBool, Ordering};
 use aux::MMC_VERSION_UNKNOWN;
+use log::debug;
+use log::info;
 
-use crate::err::SdError;
+use crate::{delay_us, err::SdError};
 
 use super::{aux, cmd::EMmcCommand, constant::*, CardType, EMmcHost};
+
+pub const EMMC_DEFAULT_BOUNDARY_SIZE: u32 = 512 * 1024;
 
 #[derive(Debug)]
 pub enum DataBuffer<'a> {
@@ -357,4 +361,159 @@ impl EMmcHost {
         
         Ok(())
     }
+
+    pub fn transfer_data(
+        &self, 
+        data_dir_read: bool, 
+        block_size: u16, 
+        block_count: u16, 
+        buffer: &mut DataBuffer
+    ) -> Result<(), SdError> {
+
+        let mut block: u16 = 0;
+        let mut transfer_done = false;
+        let mut timeout = 1000000; // 设置超时计数
+
+        // 设置数据就绪中断掩码和状态检查掩码
+        let rdy = (EMMC_INT_SPACE_AVAIL | EMMC_INT_DATA_AVAIL) as u16;
+        let mask = (EMMC_DATA_AVAILABLE | EMMC_SPACE_AVAILABLE) as u32;
+
+        loop {
+            // 读取中断状态
+            let stat = self.read_reg16(EMMC_NORMAL_INT_STAT);
+            debug!("Transfer status: {:#b}", stat);
+
+            // 检查错误
+            if stat & EMMC_INT_ERROR as u16 != 0 {
+                let err_status = self.read_reg16(EMMC_ERROR_INT_STAT);
+                info!("Data transfer error: status={:#b}, err_status={:#b}", stat, err_status);
+                
+                self.reset_data()?;
+                
+                // 映射错误类型
+                let err = if err_status & 0x10 != 0 {
+                        SdError::DataTimeout
+                    } else if err_status & 0x20 != 0 {
+                        SdError::DataCrc
+                    } else if err_status & 0x40 != 0 {
+                        SdError::DataEndBit
+                    } else {
+                        SdError::DataError
+                    };
+                    
+                return Err(err);
+            }
+
+            // 如果数据块未全部传输完且缓冲区已准备就绪
+            if !transfer_done && (stat & rdy != 0) {
+                // 再次检查当前状态寄存器确认缓冲区确实处于就绪状态
+                if self.read_reg(EMMC_PRESENT_STATE) & mask == 0 {
+                    // 若缓冲区还未就绪，则继续等待
+                    continue;
+                }
+                
+                // 清除中断状态
+                self.write_reg16(EMMC_NORMAL_INT_STAT, rdy);
+
+                match buffer {
+                    DataBuffer::Read(read_buf) => {
+                        if data_dir_read {
+                            let start = block as usize * block_size as usize;
+                            let end = start + block_size as usize;
+                            
+                            if end <= read_buf.len() {
+                                self.transfer_pio(true, &mut read_buf[start..end])?;
+                            } else {
+                                return Err(SdError::BufferOverflow);
+                            }
+                        } else {
+                            return Err(SdError::InvalidArgument);
+                        }
+                    },
+                    DataBuffer::Write(write_buf) => {
+                        if !data_dir_read {
+                            let start = block as usize * block_size as usize;
+                            let end = start + block_size as usize;
+                            
+                            if end <= write_buf.len() {
+                                let mut temp_buf = [0u8; 512]; // 假设块大小不超过512字节
+                                temp_buf[0..block_size as usize].copy_from_slice(&write_buf[start..end]);
+                                self.transfer_pio(false, &mut temp_buf[0..block_size as usize])?;
+                            } else {
+                                return Err(SdError::BufferOverflow);
+                            }
+                        } else {
+                            return Err(SdError::InvalidArgument);
+                        }
+                    },
+                }
+            
+                // 递增块计数并检查是否完成所有块的传输
+                block += 1;
+                if block >= block_count {
+                    // 所有块已传输完毕，但继续循环直到EMMC_INT_DATA_END被设置
+                    transfer_done = true;
+                    continue;
+                }
+            }
+
+            if !transfer_done && (stat & EMMC_INT_DMA_END as u16 != 0) {
+                self.write_reg16(EMMC_NORMAL_INT_STAT, EMMC_INT_DMA_END as u16);
+                
+                // 计算下一个DMA边界地址
+                let mut dma_addr = self.read_reg(EMMC_SDMASA);
+                dma_addr &= !(EMMC_DEFAULT_BOUNDARY_SIZE - 1);
+                dma_addr += EMMC_DEFAULT_BOUNDARY_SIZE;
+                
+                // 更新DMA地址寄存器
+                self.write_reg(EMMC_SDMASA, dma_addr);
+            }
+
+            // 检查是否传输结束
+            if stat & EMMC_INT_DATA_END as u16 != 0 {
+                break;
+            }
+
+            // 超时处理
+            if timeout > 0 {
+                timeout -= 1;
+                delay_us(10);
+            } else {
+                info!("Data transfer timeout");
+                return Err(SdError::DataTimeout);
+            }
+        }
+
+        Ok(())
+    }
+
+    fn transfer_pio(&self, data_dir_read: bool, buffer: &mut [u8]) -> Result<(), SdError> {
+        for i in (0..buffer.len()).step_by(4) {
+            if i + 4 <= buffer.len() {
+                if data_dir_read {
+                    // 读取4字节数据
+                    let value = self.read_reg(EMMC_BUF_DATA);
+                    
+                    // 将4字节写入缓冲区
+                    buffer[i] = (value & 0xFF) as u8;
+                    buffer[i + 1] = ((value >> 8) & 0xFF) as u8;
+                    buffer[i + 2] = ((value >> 16) & 0xFF) as u8;
+                    buffer[i + 3] = ((value >> 24) & 0xFF) as u8;
+                    debug!("Read 4 bytes: {:#x} {:#x} {:#x} {:#x}", buffer[i], buffer[i + 1], buffer[i + 2], buffer[i + 3]);
+                } else {
+                    // 从缓冲区读取4字节
+                    let value = (buffer[i] as u32) |
+                                ((buffer[i + 1] as u32) << 8) |
+                                ((buffer[i + 2] as u32) << 16) |
+                                ((buffer[i + 3] as u32) << 24);
+                    
+                    // 写入4字节数据
+                    self.write_reg(EMMC_BUF_DATA, value);
+                }
+            }
+        }
+        
+        Ok(())
+    }
+
 }

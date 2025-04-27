@@ -313,10 +313,8 @@ impl EMmcHost {
         
         if is_version_4_plus {
             self.mmc_select_hs()?;
-            self.mmc_set_clock(MMC_HIGH_52_MAX_DTR);
+            // self.mmc_set_clock(MMC_HIGH_52_MAX_DTR);
             let mut ext_csd = [0; MMC_MAX_BLOCK_LEN as usize];
-
-            // unsafe { dump_memory_region(0xfffff000fe310000, 0x1000) };
 
             self.mmc_send_ext_csd(&mut ext_csd)?;
             debug!("EXT_CSD: {:?}", ext_csd);
@@ -385,7 +383,10 @@ impl EMmcHost {
 
     fn mmc_switch(&self, _set: u8, index: u32, value: u8) -> Result<(), SdError> {
         let mut retries = 3;
-        let cmd = EMmcCommand::new(MMC_SWITCH, ((MMC_SWITCH_MODE_WRITE_BYTE as u32) << 24) | ((index as u32) << 16) | ((value as u32) << 8), MMC_RSP_R1B);
+        let cmd = EMmcCommand::new(
+            MMC_SWITCH, ((MMC_SWITCH_MODE_WRITE_BYTE as u32) << 24) | 
+            ((index as u32) << 16) | ((value as u32) << 8), 
+            MMC_RSP_R1B);
 
         loop {
             let ret = self.send_command(&cmd, None);
@@ -449,15 +450,7 @@ impl EMmcHost {
         
         self.send_command(&cmd, Some(DataBuffer::Read(ext_csd)))?;
 
-        for i in 0..MMC_MAX_BLOCK_LEN/4 {
-            let data = self.read_reg(EMMC_BUF_DATA);
-            
-            let idx = (i*4) as usize;
-            ext_csd[idx] = (data & 0xFF) as u8;
-            ext_csd[idx + 1] = ((data >> 8) & 0xFF) as u8;
-            ext_csd[idx + 2] = ((data >> 16) & 0xFF) as u8;
-            ext_csd[idx + 3] = ((data >> 24) & 0xFF) as u8;
-        }
+        debug!("CMD8: {:#x}",self.get_response().as_r1());
         
         debug!("EXT_CSD read successfully, rev: {}", ext_csd[EXT_CSD_REV as usize]);
         
