@@ -1,7 +1,5 @@
 #![allow(dead_code)]
 
-use aarch64_cpu::registers::SCTLR_EL3::C;
-
 use super::EMmcHost;
 
 impl EMmcHost {

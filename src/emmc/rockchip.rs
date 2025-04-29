@@ -1,6 +1,5 @@
-use bare_test::boot::debug;
 use log::{debug, info};
-use crate::{delay_us, dump_memory_region, emmc::{aux::dll_lock_wo_tmout, clock::emmc_set_clk, config::EMmcChipConfig}, err::SdError};
+use crate::{delay_us, emmc::{aux::dll_lock_wo_tmout, clock::emmc_set_clk, config::EMmcChipConfig}, err::SdError};
 use super::{constant::*, EMmcHost};
 
 impl EMmcHost {
@@ -268,24 +267,24 @@ impl EMmcHost {
         let timing = self.card.as_ref().unwrap().timing;
 
         let mut ctrl_2 = self.read_reg16(EMMC_HOST_CTRL2);
-        ctrl_2 &= !SDHCI_CTRL_UHS_MASK;
+        ctrl_2 &= !MMC_CTRL_UHS_MASK;
 
         if (timing != MMC_TIMING_LEGACY) && (timing != MMC_TIMING_MMC_HS) && (timing != MMC_TIMING_SD_HS) {
-            ctrl_2 |= SDHCI_CTRL_VDD_180;
+            ctrl_2 |= MMC_CTRL_VDD_180;
         }
 
         if (timing == MMC_TIMING_MMC_HS200) || (timing == MMC_TIMING_UHS_SDR104) {
-            ctrl_2 |= SDHCI_CTRL_UHS_SDR104 | SDHCI_CTRL_DRV_TYPE_A;
+            ctrl_2 |= MMC_CTRL_UHS_SDR104 | MMC_CTRL_DRV_TYPE_A;
         } else if timing == MMC_TIMING_UHS_SDR12 {
-            ctrl_2 |= SDHCI_CTRL_UHS_SDR12;
+            ctrl_2 |= MMC_CTRL_UHS_SDR12;
         } else if timing == MMC_TIMING_UHS_SDR25 {
-            ctrl_2 |= SDHCI_CTRL_UHS_SDR25;
+            ctrl_2 |= MMC_CTRL_UHS_SDR25;
         } else if (timing == MMC_TIMING_UHS_SDR50) || (timing == MMC_TIMING_MMC_HS) {
-            ctrl_2 |= SDHCI_CTRL_UHS_SDR50;
+            ctrl_2 |= MMC_CTRL_UHS_SDR50;
         } else if (timing == MMC_TIMING_UHS_DDR50) || (timing == MMC_TIMING_MMC_DDR52) {
-            ctrl_2 |= SDHCI_CTRL_UHS_DDR50;
+            ctrl_2 |= MMC_CTRL_UHS_DDR50;
         } else if timing == MMC_TIMING_MMC_HS400 || timing == MMC_TIMING_MMC_HS400ES {
-            ctrl_2 |= SDHCI_CTRL_HS400 | SDHCI_CTRL_DRV_TYPE_A;
+            ctrl_2 |= MMC_CTRL_HS400 | MMC_CTRL_DRV_TYPE_A;
         }
 
         debug!("EMMC Host Control 2: {:#x}", ctrl_2);

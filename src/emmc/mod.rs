@@ -13,17 +13,14 @@ pub mod clock;
 
 use core::fmt::Display;
 use aux::{lldiv, MMC_VERSION_1_2, MMC_VERSION_1_4, MMC_VERSION_2_2, MMC_VERSION_3, MMC_VERSION_4, MMC_VERSION_4_1, MMC_VERSION_4_2, MMC_VERSION_4_3, MMC_VERSION_4_41, MMC_VERSION_4_5, MMC_VERSION_5_0, MMC_VERSION_5_1, MMC_VERSION_UNKNOWN};
-use bare_test::boot::debug;
 use block::{DataBuffer, EMmcCard};
 use clock::emmc_get_clk;
 use constant::*;
 use cmd::*;
 use dma_api::{DVec, Direction};
 use info::CardType;
-use crate::{delay_us, dump_memory_region, err::*, generic_fls};
+use crate::{delay_us, err::*, generic_fls};
 use log::{debug, info};
-
-// const MMC_MAX_BLOCK_LEN: usize = 512;
 
 // SD Host Controller structure
 #[derive(Debug)]
@@ -220,9 +217,6 @@ impl EMmcHost {
         let ocr = 0x00; // 2.7V to 3.6V
         let retry = 100;
 
-        // Avoid long-lived mutable borrow
-        // Instead of: let card = self.card.as_mut().unwrap();
-        
         self.mmc_go_idle()?;
 
         // Send CMD1 to set OCR and check if card is ready
@@ -285,7 +279,7 @@ impl EMmcHost {
 
         card.dsr_imp = dsr_imp;
 
-        let tran_speed = freq * mult as usize;
+        let _tran_speed = freq * mult as usize;
         let mut capacity_user = (csize as u64 + 1) << (cmult as u64 + 2);
         capacity_user *= read_bl_len as u64;
         card.capacity_user = capacity_user as u64;
@@ -544,7 +538,7 @@ impl EMmcHost {
 
         let capacity = self.capacity().unwrap_or(0);
         let read_bl_len = self.read_bl_len().unwrap_or(0);
-        let lba = lldiv(capacity, read_bl_len); 
+        let _lba = lldiv(capacity, read_bl_len); 
 
         Ok(())
     }
@@ -758,10 +752,8 @@ impl EMmcHost {
 
         // 设置执行调谐标志
         let mut ctrl = self.read_reg16(EMMC_HOST_CTRL2);
-        ctrl |= SDHCI_CTRL_EXEC_TUNING;
+        ctrl |= MMC_CTRL_EXEC_TUNING;
         self.write_reg16(EMMC_HOST_CTRL2, ctrl);
-
-        // unsafe { dump_memory_region(0xfffff000fe310000, 0xa00);}
 
         // 调用内部调谐实现
         self.__sdhci_execute_tuning(opcode)
@@ -777,8 +769,8 @@ impl EMmcHost {
             let ctrl = self.read_reg16(EMMC_HOST_CTRL2);
             
             // 如果执行调谐位已清除
-            if (ctrl & SDHCI_CTRL_EXEC_TUNING) == 0 {
-                if (ctrl & SDHCI_CTRL_TUNED_CLK) != 0 {
+            if (ctrl & MMC_CTRL_EXEC_TUNING) == 0 {
+                if (ctrl & MMC_CTRL_TUNED_CLK) != 0 {
                     return Ok(());
                 }
                 break;
@@ -807,12 +799,8 @@ impl EMmcHost {
         self.write_reg16(EMMC_BLOCK_SIZE, make_blksz(7, block_size));
         self.write_reg16(EMMC_XFER_MODE, EMMC_TRNS_READ);
 
-        let mut ext_csd: DVec<u8> = DVec::zeros(block_size as usize, 0x1000, Direction::FromDevice)
-            .ok_or(SdError::MemoryError)?;
-
-        let cmd = EMmcCommand::new(opcode, 0, MMC_RSP_R1)
-                .with_data(block_size, 1, true);
-        self.send_command(&cmd, Some(DataBuffer::Read(&mut ext_csd)))?;
+        let cmd = EMmcCommand::new(opcode, 0, MMC_RSP_R1);
+        self.send_command(&cmd, None)?;
     
         Ok(())
     }

@@ -136,11 +136,6 @@ impl EMmcHost {
             int_mask |= EMMC_INT_DATA_END as u16;
         }
 
-        if cmd.opcode == MMC_SEND_TUNING_BLOCK || cmd.opcode == MMC_SEND_TUNING_BLOCK_HS200 {
-            int_mask &= !EMMC_INT_RESPONSE as u16;
-            int_mask |= EMMC_INT_DATA_AVAIL as u16;
-        }
-
         // 设置数据传输相关寄存器
         if cmd.data_present {
             self.write_reg8(EMMC_TIMEOUT_CONTROL, 0xe);
@@ -189,6 +184,12 @@ impl EMmcHost {
 
         // 设置命令寄存器
         let mut command = (cmd.opcode as u16) << 8;
+
+        if cmd.opcode == MMC_SEND_TUNING_BLOCK || cmd.opcode == MMC_SEND_TUNING_BLOCK_HS200 {
+            int_mask &= !EMMC_INT_RESPONSE as u16;
+            int_mask |= EMMC_INT_DATA_AVAIL as u16;
+            command |= EMMC_CMD_DATA;
+        }
 
         // 映射响应类型
         if cmd.resp_type & MMC_RSP_PRESENT != 0 {
