@@ -108,11 +108,12 @@ pub const EMMC_TRNS_READ: u16 = 0x10;
 pub const EMMC_TRNS_MULTI: u16 = 0x20;
 
 // EMMC present state flags
-pub const EMMC_DATA_INHIBIT: u32 = 0x00000001;
-pub const EMMC_CMD_INHIBIT: u32 = 0x00000002;
+pub const EMMC_CMD_INHIBIT: u32 = 0x00000001;
+pub const EMMC_DATA_INHIBIT: u32 = 0x00000002;
 pub const EMMC_CARD_INSERTED: u32 = 0x00010000;
 pub const EMMC_CARD_STABLE: u32 = 0x00020000;
 pub const EMMC_WRITE_PROTECT: u32 = 0x00080000;
+pub const EMMC_DATA_0_LVL: u32 = 1 << 20;
 
 // EMMC host control flags
 pub const EMMC_CTRL_4BITBUS: u8 = 0x02;
@@ -166,6 +167,24 @@ pub const EMMC_INT_DATA_MASK: u32 = EMMC_INT_DATA_END | EMMC_INT_DMA_END | EMMC_
                                     EMMC_INT_SPACE_AVAIL | EMMC_INT_DATA_TIMEOUT | EMMC_INT_DATA_CRC | 
                                     EMMC_INT_DATA_END_BIT | EMMC_INT_ADMA_ERROR;
 pub const EMMC_INT_ALL_MASK: u32 = 0xFFFFFFFF;
+
+pub const EMMC_TIMEOUT_CLK_MASK: u32 = 0x0000003F;
+pub const EMMC_TIMEOUT_CLK_SHIFT: u32 = 0;
+pub const EMMC_TIMEOUT_CLK_UNIT: u32 = 0x00000080;
+pub const EMMC_CLOCK_BASE_MASK: u32 = 0x00003F00;
+pub const EMMC_CLOCK_V3_BASE_MASK: u32 = 0x0000FF00;
+pub const EMMC_CLOCK_BASE_SHIFT: u32 = 8;
+pub const EMMC_MAX_BLOCK_MASK: u32 = 0x00030000;
+pub const EMMC_MAX_BLOCK_SHIFT: u32 = 16;
+pub const EMMC_CAN_DO_8BIT: u32 = 1 << 18;
+pub const EMMC_CAN_DO_ADMA2: u32 = 1 << 19;
+pub const EMMC_CAN_DO_ADMA1: u32 = 1 << 20;
+pub const EMMC_CAN_DO_HISPD: u32 = 1 << 21;
+pub const EMMC_CAN_DO_SDMA: u32 = 1 << 22;
+pub const EMMC_CAN_VDD_330: u32 = 1 << 24;
+pub const EMMC_CAN_VDD_300: u32 = 1 << 25;
+pub const EMMC_CAN_VDD_180: u32 = 1 << 26;
+pub const EMMC_CAN_64BIT: u32 = 1 << 28;
 
 // SD/MMC Command definitions
 // Basic commands (class 0 and class 1)
@@ -260,8 +279,6 @@ pub const MMC_STATE_ULTRAHIGHSPEED: u32 = 1 << 5;
 pub const MMC_STATE_DDR_MODE: u32 = 1 << 6;
 pub const MMC_STATE_HS200: u32 = 1 << 7;
 pub const MMC_STATE_HS400: u32 = 1 << 8;
-
-pub const EMMC_CAN_DO_8BIT: u32 = 0x00040000; // 支持8位数据总线位掩码
 
 pub const EMMC_CAP_SDR104: u32 = 1 << 1;
 pub const EMMC_DATA_AVAILABLE: u32 = 1 << 11;
@@ -370,14 +387,6 @@ pub const EMMC_SPEC_300: u16 = 2;
 pub const EMMC_CLOCK_MUL_MASK: u32 = 0x00FF0000;
 pub const EMMC_CLOCK_MUL_SHIFT: u32 = 16;
 
-pub const EMMC_CLOCK_BASE_MASK: u32 = 0x00003F00;
-pub const EMMC_CLOCK_V3_BASE_MASK: u32 = 0x0000FF00;
-pub const EMMC_CLOCK_BASE_SHIFT: u32 = 8;
-
-pub const EMMC_CAN_VDD_330: u32 = 1 << 24;
-pub const EMMC_CAN_VDD_300: u32 = 1 << 25;
-pub const EMMC_CAN_VDD_180: u32 = 1 << 26;
-
 pub const MMC_VDD_165_195_SHIFT: u32 = 7;	
 pub const MMC_VDD_165_195: u32 = 0x00000080;	/* VDD voltage 1.65 - 1.95 */
 pub const MMC_VDD_20_21: u32 = 0x00000100;	/* VDD voltage 2.0 ~ 2.1 */
@@ -427,7 +436,7 @@ pub const OCR_ACCESS_MODE: u32 = 0x60000000;
 /* Maximum block size for MMC */
 pub const MMC_MAX_BLOCK_LEN: u32 = 512;
 
-pub const MMCPART_NOAVAILABLE: u32 = 0xff;
+pub const MMCPART_NOAVAILABLE: u8 = 0xff;
 pub const PART_ACCESS_MASK: u32 = 0x7;
 pub const PART_SUPPORT: u32 = 0x1;
 pub const ENHNCD_SUPPORT: u32 = 0x2;
@@ -443,12 +452,12 @@ pub const EXT_CSD_TIMING_HS200: u8 = 2;	/* HS200 */
 pub const EXT_CSD_TIMING_HS400: u8 = 3;	/* HS400 */
 pub const EXT_CSD_DRV_STR_SHIFT: u8 = 4;	/* Driver Strength shift */
 
-pub const EXT_CSD_BUS_WIDTH_1: u32 = 0;	/* Card is in 1 bit mode */
-pub const EXT_CSD_BUS_WIDTH_4: u32 = 1;	/* Card is in 4 bit mode */
-pub const EXT_CSD_BUS_WIDTH_8: u32 = 2;	/* Card is in 8 bit mode */
-pub const EXT_CSD_DDR_BUS_WIDTH_4: u32 = 5;	/* Card is in 4 bit DDR mode */
-pub const EXT_CSD_DDR_BUS_WIDTH_8: u32 = 6;	/* Card is in 8 bit DDR mode */
-pub const EXT_CSD_BUS_WIDTH_STROBE: u32 = 1 << 7; /* Enhanced strobe mode */
+pub const EXT_CSD_BUS_WIDTH_1: u8 = 0;	/* Card is in 1 bit mode */
+pub const EXT_CSD_BUS_WIDTH_4: u8 = 1;	/* Card is in 4 bit mode */
+pub const EXT_CSD_BUS_WIDTH_8: u8 = 2;	/* Card is in 8 bit mode */
+pub const EXT_CSD_DDR_BUS_WIDTH_4: u8 = 5;	/* Card is in 4 bit DDR mode */
+pub const EXT_CSD_DDR_BUS_WIDTH_8: u8 = 6;	/* Card is in 8 bit DDR mode */
+pub const EXT_CSD_BUS_WIDTH_STROBE: u8 = 1 << 7; /* Enhanced strobe mode */
 
 /* frequency bases */
 /* divided by 10 to be nice to platforms without floating point */
@@ -524,3 +533,41 @@ pub const EXT_CSD_SEC_FEATURE_SUPPORT: u32 = 231;     /* RO */
 pub const EXT_CSD_BKOPS_SUPPORT: u32 = 502;	/* RO */
 
 pub const EXT_CSD_PARTITION_SETTING_COMPLETED: u32 = 1 << 0;
+
+pub const EXT_CSD_SEC_ER_EN: u32 = 1 << 0;
+pub const EXT_CSD_SEC_BD_BLK_EN: u32 = 1 << 2;
+pub const EXT_CSD_SEC_GB_CL_EN: u32 = 1 << 4; 
+pub const EXT_CSD_SEC_SANITIZE: u32 = 1 << 6;
+
+pub const MMC_MODE_HS: u32 = (1 << 0);
+pub const MMC_MODE_HS_52MHZ: u32 = (1 << 1);
+pub const MMC_MODE_4BIT: u32 = (1 << 2);
+pub const MMC_MODE_8BIT: u32 = (1 << 3);
+pub const MMC_MODE_SPI: u32 = (1 << 4);
+pub const MMC_MODE_DDR_52MHZ: u32 = (1 << 5);
+pub const MMC_MODE_HS200: u32 = (1 << 6);
+pub const MMC_MODE_HS400: u32 = (1 << 7);
+pub const MMC_MODE_HS400ES: u32 = (1 << 8);
+
+pub const EXT_CSD_CARD_TYPE_26: u16 = (1 << 0);	/* Card can run at 26MHz */
+pub const EXT_CSD_CARD_TYPE_52: u16 = (1 << 1);	/* Card can run at 52MHz */
+pub const EXT_CSD_CARD_TYPE_HS: u16 = (EXT_CSD_CARD_TYPE_26 | EXT_CSD_CARD_TYPE_52);
+pub const EXT_CSD_CARD_TYPE_HS200_1_8V: u16 = 1 << 4;	/* Card can run at 200MHz */
+pub const EXT_CSD_CARD_TYPE_HS200_1_2V: u16 = 1 << 5;	/* Card can run at 200MHz */
+pub const EXT_CSD_CARD_TYPE_HS200: u16 = (EXT_CSD_CARD_TYPE_HS200_1_8V | EXT_CSD_CARD_TYPE_HS200_1_2V);
+pub const EXT_CSD_CARD_TYPE_HS400_1_8V: u16 = 1 << 6;	/* Card can run at 200MHz DDR, 1.8V */
+pub const EXT_CSD_CARD_TYPE_HS400_1_2V: u16 = 1 << 7;	/* Card can run at 200MHz DDR, 1.2V */
+pub const EXT_CSD_CARD_TYPE_HS400: u16 = (EXT_CSD_CARD_TYPE_HS400_1_8V | EXT_CSD_CARD_TYPE_HS400_1_2V);
+pub const EXT_CSD_CARD_TYPE_HS400ES: u16 = 1 << 8;	/* Card can run at HS400ES */
+
+pub const EXT_CSD_CARD_TYPE_DDR_1_8V: u8 = (1 << 2);
+pub const EXT_CSD_CARD_TYPE_DDR_1_2V: u8 = (1 << 3);
+pub const EXT_CSD_CARD_TYPE_DDR_52: u8 = (EXT_CSD_CARD_TYPE_DDR_1_8V | EXT_CSD_CARD_TYPE_DDR_1_2V);
+
+pub const MMC_BUS_WIDTH_1BIT: u8 = 1;
+pub const MMC_BUS_WIDTH_4BIT: u8 = 4;
+pub const MMC_BUS_WIDTH_8BIT: u8 = 8;
+
+
+
+

@@ -6,7 +6,9 @@ extern crate alloc;
 
 #[bare_test::tests]
 mod tests {
+    use alloc::vec::{self, Vec};
     use bare_test::{globals::{global_val, PlatformInfoKind}, mem::iomap, platform::page_size, println};
+    use dma_api::{DVec, Direction};
     use fdt_parser::PciSpace;
     use log::{debug, info, warn};
     use pcie::{CommandRegister, DeviceType, Header, RootComplexGeneric, SimpleBarAllocator};
@@ -204,6 +206,90 @@ mod tests {
                         warn!("Failed to get card info: {:?}", e);
                     }
                 }
+
+                // Test reading the first block
+                println!("Attempting to read first block...");
+                let mut buffer: DVec<u8> = DVec::zeros(512, 0x1000, Direction::FromDevice).unwrap();
+                match emmc.read_block(0, &mut buffer) {
+                    Ok(_) => {
+                        println!("Successfully read first block!");
+                        let block_bytes: Vec<u8> = (0..16).map(|i| buffer[i]).collect();
+                        println!("First 16 bytes of first block: {:02X?}", block_bytes);
+                    },
+                    Err(e) => {
+                        warn!("Block read failed: {:?}", e);
+                    }
+                }
+
+                // // Test writing and reading back a block
+                // println!("Testing write and read back...");
+                // let test_block_addr = 100; // Use a safe block address for testing
+
+                // // Prepare test pattern data
+                // let mut write_buffer = DVec::zeros(512, 0x1000, Direction::ToDevice).unwrap();
+                // for i in 0..512 {
+                //     write_buffer.set(i, (i % 256) as u8);
+                // }
+
+                // // Write data
+                // match emmc.write_block(test_block_addr, &write_buffer) {
+                //     Ok(_) => {
+                //         println!("Successfully wrote to block {}!", test_block_addr);
+                        
+                //         // Read back data
+                //         let mut read_buffer = DVec::zeros(512, 0x1000, Direction::FromDevice).unwrap();
+                //         match emmc.read_block(test_block_addr, &mut read_buffer) {
+                //             Ok(_) => {
+                //                 println!("Successfully read back block {}!", test_block_addr);
+                                
+                //                 // Verify data consistency
+                //                 let mut data_match = true;
+                //                 for i in 0..512 {
+                //                     if write_buffer[i] != read_buffer[i] {
+                //                         data_match = false;
+                //                         println!("Data mismatch: offset {}, wrote {:02X}, read {:02X}",
+                //                                 i, write_buffer[i], read_buffer[i]);
+                //                         break;
+                //                     }
+                //                 }
+                                
+                //                 if data_match {
+                //                     println!("Data verification successful: written and read data match perfectly!");
+                //                 } else {
+                //                     println!("Data verification failed: written and read data do not match!");
+                //                 }
+                //             },
+                //             Err(e) => {
+                //                 warn!("Failed to read back block: {:?}", e);
+                //             }
+                //         }
+                //     },
+                //     Err(e) => {
+                //         warn!("Block write failed: {:?}", e);
+                //     }
+                // }
+
+                // Test multi-block read
+                println!("Testing multi-block read...");
+                let multi_block_addr = 200;
+                let block_count = 4; // Read 4 blocks
+                let mut multi_buffer = DVec::zeros(512 * block_count as usize, 0x1000, Direction::FromDevice).unwrap();
+
+                match emmc.read_blocks(multi_block_addr, block_count, &mut multi_buffer) {
+                    Ok(_) => {
+                        println!("Successfully read {} blocks starting at block address {}!", block_count, multi_block_addr);
+
+                        let first_block_bytes: Vec<u8> = (0..16).map(|i| multi_buffer[i]).collect();
+                        println!("First 16 bytes of first block: {:02X?}", first_block_bytes);
+
+                        let last_block_offset = (block_count as usize - 1) * 512;
+                        let last_block_bytes: Vec<u8> = (0..16).map(|i| multi_buffer[last_block_offset + i]).collect();
+                        println!("First 16 bytes of last block: {:02X?}", last_block_bytes);
+                    },
+                    Err(e) => {
+                        warn!("Multi-block read failed: {:?}", e);
+                    }
+                }
             },
             Err(e) => {
                 warn!("SD card initialization failed: {:?}", e);
@@ -213,6 +299,4 @@ mod tests {
         // Test complete
         println!("SD card test complete");
     }
-
-    
 }

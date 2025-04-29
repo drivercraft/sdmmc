@@ -29,3 +29,21 @@ pub fn dll_lock_wo_tmout(x: u32) -> bool {
     ((x & DWCMSHC_EMMC_DLL_LOCKED) == DWCMSHC_EMMC_DLL_LOCKED) && 
     ((x & DWCMSHC_EMMC_DLL_TIMEOUT) == 0)
 }
+
+#[inline]
+pub fn lldiv(dividend: u64, divisor: u32) -> u64 {
+    // 创建被除数的副本
+    let mut result = dividend;
+    
+    let _ = do_div(&mut result, divisor);
+    
+    // 返回商
+    result
+}
+
+#[inline]
+fn do_div(n: &mut u64, base: u32) -> u32 {
+    let remainder = (*n % base as u64) as u32;
+    *n /= base as u64;
+    remainder
+}

@@ -1,6 +1,6 @@
 use bare_test::boot::debug;
 use log::{debug, info};
-use crate::{delay_us, emmc::{aux::dll_lock_wo_tmout, clock::emmc_set_clk, config::EMmcChipConfig}, err::SdError};
+use crate::{delay_us, dump_memory_region, emmc::{aux::dll_lock_wo_tmout, clock::emmc_set_clk, config::EMmcChipConfig}, err::SdError};
 use super::{constant::*, EMmcHost};
 
 impl EMmcHost {
@@ -72,7 +72,7 @@ impl EMmcHost {
             div = i >> 1;
         }
 
-        info!("EMMC Clock Divisor: {:x}", div);
+        info!("EMMC Clock Divisor: 0x{:x}", div);
 
         clk |= ((div as u16) & 0xFF) << EMMC_DIVIDER_SHIFT;
         clk |= (((div as u16) & 0x300) >> 8) << EMMC_DIVIDER_HI_SHIFT;
@@ -160,7 +160,7 @@ impl EMmcHost {
         if freq >= 100_000_000 { // 100 MHz
             // Enable DLL
             self.write_reg(DWCMSHC_EMMC_DLL_CTRL, DWCMSHC_EMMC_DLL_CTRL_RESET);
-            delay_us(10);
+            delay_us(1000);
             self.write_reg(DWCMSHC_EMMC_DLL_CTRL, 0);
             let mut extra = 0x1 << 16 | 0x2 << 17 | 0x3 << 19;
             self.write_reg(DWCMSHC_EMMC_ATCTRL, extra);
@@ -169,15 +169,19 @@ impl EMmcHost {
             extra = DWCMSHC_EMMC_DLL_START_DEFAULT << DWCMSHC_EMMC_DLL_START_POINT | 
                     DWCMSHC_EMMC_DLL_INC_VALUE << DWCMSHC_EMMC_DLL_INC |
                     DWCMSHC_EMMC_DLL_START;
-            self.write_reg(DWCMSHC_EMMC_ATCTRL, extra);
+            self.write_reg(DWCMSHC_EMMC_DLL_CTRL, extra);
 
-            while !dll_lock_wo_tmout(self.read_reg(DWCMSHC_EMMC_DLL_STATUS0)) {
+            loop {
                 if timeout <= 0 {
                     info!("Timeout waiting for DLL to be ready");
                     return Err(SdError::Timeout);
                 }
+
+                if dll_lock_wo_tmout(self.read_reg(DWCMSHC_EMMC_DLL_STATUS0)) {
+                    break;
+                }
                 
-                delay_us(10);
+                delay_us(1000);
                 timeout -= 1;
             }
 
@@ -191,7 +195,7 @@ impl EMmcHost {
             if (data.flags & RK_TAP_VALUE_SEL) != 0 {
                 extra |= DLL_TAP_VALUE_SEL | (dll_lock_value << DLL_TAP_VALUE_OFFSET);
             }
-            self.write_reg(extra, DWCMSHC_EMMC_DLL_RXCLK);
+            self.write_reg(DWCMSHC_EMMC_DLL_RXCLK, extra);
 
             let mut txclk_tapnum = data.hs200_tx_tap;
             if (data.flags & RK_DLL_CMD_OUT) != 0 && (timing == MMC_TIMING_MMC_HS400 || timing == MMC_TIMING_MMC_HS400ES) {
@@ -294,10 +298,10 @@ impl EMmcHost {
             let card = self.card.as_ref().unwrap();
             (card.clock, card.bus_width, card.timing)
         };
+
+        debug!("card_clock: {}, bus_width: {}, timing: {}", card_clock, bus_width, timing);
         
-        if card_clock != self.clock {
-            self.dwcmshc_sdhci_emmc_set_clock(card_clock).unwrap();
-        }
+        self.dwcmshc_sdhci_emmc_set_clock(card_clock).unwrap();
     
         /* Set bus width */
         let mut ctrl = self.read_reg8(EMMC_HOST_CTRL1);

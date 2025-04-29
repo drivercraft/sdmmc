@@ -197,6 +197,12 @@ dependencies = [
 
 [[package]]
 name = "dma-api"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "624f4a84cc1031cfceb56780b82570a785f6cfdcee4f34c06c4e8f1fba25c970"
+
+[[package]]
+name = "dma-api"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bc2af71bef611a9b47e76fb7844ab348b172aa3649ebdfdcb854a5d30cd47be5"
@@ -348,6 +354,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "paste"
+version = "1.0.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
+
+[[package]]
 name = "pasts"
 version = "0.14.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -489,9 +501,11 @@ dependencies = [
  "bare-test-macros",
  "bitflags",
  "byte-unit",
+ "dma-api 0.2.2",
  "fdt-parser",
  "kspin",
  "log",
+ "paste",
  "pcie",
  "smccc 0.2.0",
  "spin 0.10.0",
@@ -523,7 +537,7 @@ dependencies = [
  "arrayvec",
  "buddy_system_allocator",
  "byte-unit",
- "dma-api",
+ "dma-api 0.3.0",
  "fdt-parser",
  "lazy_static",
  "lock_api",

@@ -28,6 +28,8 @@ pub enum SdError {
     BadMessage,
     InvalidArgument,
     BufferOverflow,
+    MemoryError,
+    BusWidth,
     CardError(u32, &'static str), // 包含错误状态和描述
 }
 
@@ -58,6 +60,8 @@ impl fmt::Display for SdError {
             SdError::BadMessage => write!(f, "Bad message"),
             SdError::InvalidArgument => write!(f, "Invalid argument"),
             SdError::BufferOverflow => write!(f, "Buffer overflow"),
+            SdError::MemoryError => write!(f, "Memory error"),
+            SdError::BusWidth => write!(f, "Bus width error"),
             SdError::CardError(status, desc) => write!(f, "Card error: 0x{:X} ({})", status, desc),
         }
     }
