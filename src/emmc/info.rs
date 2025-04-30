@@ -1,7 +1,5 @@
 use core::sync::atomic::Ordering;
-
 use crate::err::SdError;
-
 use super::{block::EMmcCard, cmd::EMmcCommand, constant::*, EMmcHost};
 
 // Card information structure

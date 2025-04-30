@@ -41,17 +41,17 @@ pub enum RK3568Error {
 #[repr(C)]
 pub struct RK3568Cru {
     cru_apll_con: [u32; 5],             // APLL 寄存器 /* 0x0000~0x0014 */
-    reserved0: [u32; 3],                // 保留
+    reserved0: [u32; 3],                // reserved
     cru_dpll_con: [u32; 5],             // GPLL 寄存器 /* 0x0020~0x0034 */
-    reserved1: [u32; 3],                // 保留
+    reserved1: [u32; 3],                // reserved
     cru_gpll_con: [u32; 5],             // CPLL 寄存器 /* 0x0040~0x0054 */
-    reserved2: [u32; 3],                // 保留
+    reserved2: [u32; 3],                // reserved
     cru_cpll_con: [u32; 5],             // DPLL 寄存器 /* 0x0060~0x0074 */
-    reserved3: [u32; 3],                // 保留
+    reserved3: [u32; 3],                // reserved
     cru_npll_con: [u32; 2],             // NPLL 寄存器 /* 0x0080~0x0088 */
-    reserved4: [u32; 6],                // 保留
+    reserved4: [u32; 6],                // reserved
     cru_vpll_con: [u32; 2],             // GPLL2 寄存器 /* 0x00A0~0x00A8 */
-    reserved5: [u32; 6],                // 保留
+    reserved5: [u32; 6],                // reserved
     
     cru_mode_con00: u32,                // 模式控制寄存器 /* 0x00C0 */
     cru_misc_con: [u32; 3],             // 杂项控制寄存器 
@@ -61,32 +61,32 @@ pub struct RK3568Cru {
     cru_glb_rst_con: u32,               // 全局软复位阈值
     cru_glb_rst_st: u32,                // 全局软复位状态
     
-    reserved6: [u32; 7],                // 保留
+    reserved6: [u32; 7],                // reserved
     clksel_con: [u32; 85],              // 时钟选择寄存器
-    reserved7: [u32; 43],               // 保留
+    reserved7: [u32; 43],               // reserved
     clk_gate_con: [u32; 36],            // 时钟门控寄存器
-    reserved8: [u32; 28],               // 保留
+    reserved8: [u32; 28],               // reserved
     
     cru_softrst_con: [u32; 30],         // 软复位寄存器
-    reserved9: [u32; 2],                // 保留
+    reserved9: [u32; 2],                // reserved
     cru_ssgtbl: [u32; 32],              // SSG表寄存器
 
-    cru_autocs_core_con: [u32; 2],
-    cru_autocs_gpu_con: [u32; 2],
-    cru_autocs_bus_con: [u32; 2],
-    cru_autocs_top_con: [u32; 2],
-    cru_autocs_rkvdec_con: [u32; 2],
-    cru_autocs_rkvenc_con: [u32; 2],
-    cru_autocs_vpu_con: [u32; 2],
-    cru_autocs_peri_con: [u32; 2],
-    cru_autocs_gpll_con: [u32; 2],
-    cru_autocs_cpll_con: [u32; 2],
+    cru_autocs_core_con: [u32; 2],      // Pdcore auto clock swith control
+    cru_autocs_gpu_con: [u32; 2],       // Pdgpu auto clock swith control
+    cru_autocs_bus_con: [u32; 2],       // Pdbus auto clock swith control
+    cru_autocs_top_con: [u32; 2],       // Top auto clock swith control
+    cru_autocs_rkvdec_con: [u32; 2],    // Rkvdec auto clock swith control
+    cru_autocs_rkvenc_con: [u32; 2],    // Rkvenc auto clock swith control
+    cru_autocs_vpu_con: [u32; 2],       // Vpu auto clock swith control
+    cru_autocs_peri_con: [u32; 2],      // Pdperi auto clock swith control
+    cru_autocs_gpll_con: [u32; 2],      // Gpll auto clock swith control
+    cru_autocs_cpll_con: [u32; 2],      // Cpll auto clock swith control
 
-    reserved10: [u32; 12],              // 保留
-    sdmmc0_con: [u32; 2],               // SDMMC0控制寄存器
-    sdmmc1_con: [u32; 2],               // SDMMC1控制寄存器
-    sdmmc2_con: [u32; 2],               // SDMMC2控制寄存器
-    emmc_con: [u32; 2],                 // eMMC控制寄存器
+    reserved10: [u32; 12],              // reserved
+    sdmmc0_con: [u32; 2],               // SDMMC0 control
+    sdmmc1_con: [u32; 2],               // SDMMC1 control
+    sdmmc2_con: [u32; 2],               // SDMMC2 control
+    emmc_con: [u32; 2],                 // EMMC control
 }
 
 /// RK3568 时钟驱动

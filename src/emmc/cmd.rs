@@ -84,35 +84,35 @@ impl SdResponse {
 }
 
 impl EMmcHost {
-    // 发送命令
+    // Send command
     pub fn send_command(&self, cmd: &EMmcCommand, mut data_buffer: Option<DataBuffer>) -> Result<(), SdError> {
         let mut cmd_timeout = CMD_DEFAULT_TIMEOUT;
         
-        // 检查命令或数据线是否忙碌
+        // Check if command or data line is busy
         let mut mask = EMMC_CMD_INHIBIT;
         if cmd.data_present {
             mask |= EMMC_DATA_INHIBIT;
         }
         
-        // 对于STOP_TRANSMISSION命令，不需要等待数据抑制
+        // For STOP_TRANSMISSION command, no need to wait for data inhibit
         if cmd.opcode == MMC_STOP_TRANSMISSION {
             mask &= !EMMC_DATA_INHIBIT;
         }
 
-        // 使用动态调整的超时时间进行等待
+        // Wait using dynamically adjusted timeout
         let mut time: u32 = 0;
         while (self.read_reg(EMMC_PRESENT_STATE) & mask) != 0 {
             if time >= cmd_timeout {
                 info!("MMC: busy timeout");
                 
-                // 如果超时时间还可以增加，则增加超时时间并继续
+                // If timeout can be increased, double the timeout and continue
                 if 2 * cmd_timeout <= CMD_MAX_TIMEOUT {
                     cmd_timeout += cmd_timeout;
                     info!("timeout increasing to: {} ms.", cmd_timeout);
                     self.write_reg16(EMMC_NORMAL_INT_STAT, 0xFFFF);
                 } else {
                     info!("timeout.");
-                    // 不返回错误，尝试继续发送命令
+                    // Do not return an error, attempt to continue sending the command
                     break;
                 }
             }
@@ -120,7 +120,7 @@ impl EMmcHost {
             delay_us(1000);
         }
         
-        // 清除所有中断状态
+        // Clear all interrupt statuses
         self.write_reg16(EMMC_NORMAL_INT_STAT, 0xFFFF);
         self.write_reg16(EMMC_ERROR_INT_STAT, 0xFFFF);
 
@@ -131,12 +131,12 @@ impl EMmcHost {
 
         let mut int_mask = EMMC_INT_RESPONSE as u16;
         
-        // 如果有数据且响应类型包含BUSY标志，则也等待数据结束中断
+        // If data is present and the response type includes the BUSY flag, wait for data end interrupt
         if cmd.data_present && (cmd.resp_type & MMC_RSP_BUSY != 0) {
             int_mask |= EMMC_INT_DATA_END as u16;
         }
 
-        // 设置数据传输相关寄存器
+        // Set data transfer-related registers
         if cmd.data_present {
             self.write_reg8(EMMC_TIMEOUT_CONTROL, 0xe);
 
@@ -150,7 +150,7 @@ impl EMmcHost {
                 mode |= EMMC_TRNS_READ;
             }
 
-            // 传输模式配置
+            // Configure transfer mode
             self.write_reg16(EMMC_XFER_MODE, mode);
 
             match data_buffer {
@@ -170,19 +170,19 @@ impl EMmcHost {
             
             mode |= EMMC_TRNS_DMA;
 
-            // 设置块大小和数量
+            // Set block size and count
             self.write_reg16(EMMC_BLOCK_SIZE, (((EMMC_DEFAULT_BOUNDARY_ARG & 0x7) << 12) | (cmd.block_size & 0xFFF)).try_into().unwrap());
             self.write_reg16(EMMC_BLOCK_COUNT, cmd.block_count);
             self.write_reg16(EMMC_XFER_MODE, mode);
         } else if cmd.resp_type & MMC_RSP_BUSY != 0 {
-            // 对于带BUSY的命令，但没有数据的情况，仍然设置超时控制
+            // For commands with BUSY but no data, still set timeout control
             self.write_reg8(EMMC_TIMEOUT_CONTROL, 0xe);
         }
 
-        // 设置参数
+        // Set parameters
         self.write_reg(EMMC_ARGUMENT, cmd.arg);
 
-        // 设置命令寄存器
+        // Set command register
         let mut command = (cmd.opcode as u16) << 8;
 
         if cmd.opcode == MMC_SEND_TUNING_BLOCK || cmd.opcode == MMC_SEND_TUNING_BLOCK_HS200 {
@@ -191,7 +191,7 @@ impl EMmcHost {
             command |= EMMC_CMD_DATA;
         }
 
-        // 映射响应类型
+        // Map response type
         if cmd.resp_type & MMC_RSP_PRESENT != 0 {
             if cmd.resp_type & MMC_RSP_136 != 0 {
                 command |= EMMC_CMD_RESP_LONG;
@@ -215,36 +215,34 @@ impl EMmcHost {
         }
 
         info!("Sending command: {:#x}", command);
-        // 0x151a == 0001 0101 0001 1010
-        // 0x153a == 0001 0101 0011 1010
- 
-        // 特殊命令特殊处理
+    
+        // Special command handling
         let mut timeout_val = if cmd.opcode == MMC_GO_IDLE_STATE || cmd.opcode == MMC_SEND_OP_COND {
-            CMD_MAX_TIMEOUT // 初始化命令的更长超时
+            CMD_MAX_TIMEOUT
         } else {
             CMD_DEFAULT_TIMEOUT
         };
 
-        // 发送命令
+        // Send the command
         self.write_reg16(EMMC_COMMAND, command);
 
-        // 等待命令完成
+        // Wait for command completion
         let mut status: u16;
         loop {
             status = self.read_reg16(EMMC_NORMAL_INT_STAT);
             info!("Response Status: {:#b}", status);
             
-            // 检查错误
+            // Check for errors
             if status & EMMC_INT_ERROR as u16 != 0 {
                 break;
             }
             
-            // 检查响应完成
+            // Check for response completion
             if (status & int_mask) == int_mask {
                 break;
             }
             
-            // 检查超时
+            // Check for timeout
             if timeout_val <= 0 {
                 info!("Timeout for status update!");
                 return Err(SdError::Timeout);
@@ -254,26 +252,26 @@ impl EMmcHost {
             delay_us(100);
         }
         
-        // 处理命令完成
+        // Process command completion
         if (status & (EMMC_INT_ERROR as u16 | int_mask)) == int_mask {
-            // 命令成功完成
+            // Command successfully completed
             info!("Command completed: status={:#b}", status);
             self.write_reg16(EMMC_NORMAL_INT_STAT, int_mask);
         } else {
-            // 发生错误
+            // Error occurred
             debug!("EMMC Normal Int Status: 0x{:x}", self.read_reg16(EMMC_NORMAL_INT_STAT));
             debug!("EMMC Error Int Status: 0x{:x}", self.read_reg16(EMMC_ERROR_INT_STAT));
             
             let err_status = self.read_reg16(EMMC_ERROR_INT_STAT);
             info!("Command error: status={:#b}, err_status={:#b}", status, err_status);
             
-            // 复位命令和数据线
+            // Reset command and data lines
             self.reset_cmd()?;
             if cmd.data_present {
                 self.reset_data()?;
             }
             
-            // 映射具体错误类型
+            // Map specific error types
             let err = if err_status & 0x1 != 0 {
                     SdError::Timeout
                 } else if err_status & 0x2 != 0 {
@@ -297,17 +295,17 @@ impl EMmcHost {
             return Err(err);
         }
 
-        // 处理数据传输部分
+        // Process data transfer part
         if cmd.data_present {
             debug!("Data transfer: cmd.data_present={}", cmd.data_present);
             if let Some(_buffer) = &mut data_buffer {
-                self.transfer_data()?;
+                self.transfer_data_by_dma()?;
             } else {
                 return Err(SdError::InvalidArgument);
             }
         }
 
-        // 清除所有中断状态
+        // Clear all interrupt statuses
         self.write_reg16(EMMC_NORMAL_INT_STAT, 0xFFFF);
         self.write_reg16(EMMC_ERROR_INT_STAT, 0xFFFF);
 
@@ -316,6 +314,7 @@ impl EMmcHost {
         
         Ok(())
     }
+
 
     // Reset command line
     pub fn reset_cmd(&self) -> Result<(), SdError> {

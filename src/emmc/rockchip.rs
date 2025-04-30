@@ -341,7 +341,3 @@ impl EMmcHost {
         self.read_reg16(EMMC_HOST_CNTRL_VER) & 0xFF
     }
 }
-
-const EMMC_PROG_CLOCK_MODE: u16 = 0x0020;
-const EMMC_DIVIDER_SHIFT: u16 = 8;
-const EMMC_DIVIDER_HI_SHIFT: u16 = 6;

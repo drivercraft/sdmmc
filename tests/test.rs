@@ -6,15 +6,30 @@ extern crate alloc;
 
 #[bare_test::tests]
 mod tests {
-    use alloc::vec::{self, Vec};
-    use bare_test::{globals::{global_val, PlatformInfoKind}, mem::iomap, platform::page_size, println};
+    use alloc::vec::Vec;
+    use bare_test::{globals::{global_val, PlatformInfoKind}, mem::iomap, platform::page_size, println, time::since_boot};
     use dma_api::{DVec, Direction};
     use fdt_parser::PciSpace;
     use log::{debug, info, warn};
     use pcie::{CommandRegister, DeviceType, Header, RootComplexGeneric, SimpleBarAllocator};
-    use sdmmc::sdhci::SdHost;
+    use sdmmc::{sdhci::SdHost, set_impl, Kernel};
     use sdmmc::emmc::EMmcHost;
     use sdmmc::emmc::clock::*;
+
+    struct SKernel;
+
+    impl Kernel for SKernel {
+        fn sleep(us: u64) {
+            let start = since_boot();
+            let duration = core::time::Duration::from_micros(us);
+            
+            while since_boot() - start < duration {
+                core::hint::spin_loop();
+            }
+        }
+    }
+    
+    set_impl!(SKernel);
 
     #[test]
     fn test_platform() {
@@ -210,7 +225,7 @@ mod tests {
                 // Test reading the first block
                 println!("Attempting to read first block...");
                 let mut buffer: DVec<u8> = DVec::zeros(512, 0x1000, Direction::FromDevice).unwrap();
-                match emmc.read_block(0, &mut buffer) {
+                match emmc.read_blocks(0, 1, &mut buffer) {
                     Ok(_) => {
                         println!("Successfully read first block!");
                         let block_bytes: Vec<u8> = (0..16).map(|i| buffer[i]).collect();
@@ -232,13 +247,13 @@ mod tests {
                 }
 
                 // Write data
-                match emmc.write_block(test_block_addr, &write_buffer) {
+                match emmc.write_blocks(test_block_addr, 1, &write_buffer) {
                     Ok(_) => {
                         println!("Successfully wrote to block {}!", test_block_addr);
                         
                         // Read back data
                         let mut read_buffer = DVec::zeros(512, 0x1000, Direction::FromDevice).unwrap();
-                        match emmc.read_block(test_block_addr, &mut read_buffer) {
+                        match emmc.read_blocks(test_block_addr, 1, &mut read_buffer) {
                             Ok(_) => {
                                 println!("Successfully read back block {}!", test_block_addr);
                                 

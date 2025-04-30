@@ -461,33 +461,15 @@ pub const EXT_CSD_BUS_WIDTH_STROBE: u8 = 1 << 7; /* Enhanced strobe mode */
 
 /* frequency bases */
 /* divided by 10 to be nice to platforms without floating point */
-pub const FBASE: [usize; 4] = [
-    10000,
-    100000,
-    1000000,
-    10000000,
-];
+pub const FBASE: [usize; 4] = [10000, 100000, 1000000, 10000000];
 
 /* Multiplier values for TRAN_SPEED.  Multiplied by 10 to be nice
 * to platforms without floating point.
 */
 pub const MULTIPLIERS: [u8; 16] = [
     0,	/* reserved */
-    10,
-    12,
-    13,
-    15,
-    20,
-    25,
-    30,
-    35,
-    40,
-    45,
-    50,
-    55,
-    60,
-    70,
-    80,
+    10, 12, 13, 15, 20, 25, 30, 35,
+    40, 45, 50, 55, 60, 70, 80,
 ];
 
 /*
@@ -568,6 +550,8 @@ pub const MMC_BUS_WIDTH_1BIT: u8 = 1;
 pub const MMC_BUS_WIDTH_4BIT: u8 = 4;
 pub const MMC_BUS_WIDTH_8BIT: u8 = 8;
 
-
+pub const EMMC_PROG_CLOCK_MODE: u16 = 0x0020;
+pub const EMMC_DIVIDER_SHIFT: u16 = 8;
+pub const EMMC_DIVIDER_HI_SHIFT: u16 = 6;
 
 
