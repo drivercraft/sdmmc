@@ -192,20 +192,17 @@ impl EMmcHost {
 
         // // Convert to byte address for standard capacity cards
         // let addr = if card.state & MMC_STATE_HIGHCAPACITY != 0 {
-        //     addr
+        //     block_addr
         // } else {
-        //     addr * 512
+        //     block_addr * 512
         // };
 
-        debug!("Reading block at address: {}", addr);
+        debug!("Reading block at address: {:#x}", block_addr);
 
         // Send READ_SINGLE_BLOCK command
-        let cmd = EMmcCommand::new(MMC_READ_SINGLE_BLOCK, addr, MMC_RSP_R1)
+        let cmd = EMmcCommand::new(MMC_READ_SINGLE_BLOCK, block_addr, MMC_RSP_R1)
             .with_data(512, 1, true);
         self.send_command(&cmd, Some(DataBuffer::Read(buffer)))?;
-
-        // Read data from buffer register
-        self.read_buffer(buffer)?;
 
         Ok(())
     }
@@ -213,7 +210,7 @@ impl EMmcHost {
     // Read data from the buffer register
     fn read_buffer(&self, buffer: &mut DVec<u8>) -> Result<(), SdError> {
         // Wait for data available
-        let mut timeout = 100000;
+        let mut timeout = 1000000;
         while timeout > 0 {
             let int_status = self.read_reg(EMMC_NORMAL_INT_STAT);
             if int_status & EMMC_INT_DATA_AVAIL != 0 {
@@ -241,7 +238,6 @@ impl EMmcHost {
         for i in (0..len).step_by(4) {
             let val = self.read_reg(EMMC_BUF_DATA);
             
-            // 使用DVec的set方法设置数据，而不是直接索引
             buffer.set(i, (val & 0xFF) as u8);
             
             if i + 1 < len {
@@ -274,14 +270,14 @@ impl EMmcHost {
             None => return Err(SdError::NoCard),
         };
 
-        if !card.initialized.load(Ordering::SeqCst) {
-            return Err(SdError::UnsupportedCard);
-        }
+        // if !card.initialized.load(Ordering::SeqCst) {
+        //     return Err(SdError::UnsupportedCard);
+        // }
 
-        // Check if card is write protected
-        if self.is_write_protected() {
-            return Err(SdError::IoError);
-        }
+        // // Check if card is write protected
+        // if self.is_write_protected() {
+        //     return Err(SdError::IoError);
+        // }
 
         // Convert to byte address for standard capacity cards
         let addr = if card.state & MMC_STATE_HIGHCAPACITY != 0 {
@@ -294,7 +290,6 @@ impl EMmcHost {
         let use_dma = true; // 这可以是配置选项
 
         if use_dma {
-            // DMA模式 - 使用send_command的DMA能力
             let cmd = EMmcCommand::new(MMC_WRITE_BLOCK, addr, MMC_RSP_R1)
                 .with_data(512, 1, false);
             self.send_command(&cmd, Some(DataBuffer::Write(buffer)))?;
@@ -508,7 +503,7 @@ impl EMmcHost {
     pub fn transfer_data(
         &self, 
     ) -> Result<(), SdError> {
-        let mut timeout = 1000;
+        let mut timeout = 100;
 
         loop {
             let stat = self.read_reg16(EMMC_NORMAL_INT_STAT);

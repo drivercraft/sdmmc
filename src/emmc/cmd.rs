@@ -225,10 +225,6 @@ impl EMmcHost {
             CMD_DEFAULT_TIMEOUT
         };
 
-        // if cmd.opcode == 8 {
-        //     unsafe {dump_memory_region(0xfffff000fe310000, 0x900);}
-        // }
-
         // 发送命令
         self.write_reg16(EMMC_COMMAND, command);
 
@@ -257,10 +253,6 @@ impl EMmcHost {
             timeout_val -= 1;
             delay_us(100);
         }
-
-        // if cmd.opcode == 8 {
-        //     unsafe {dump_memory_region(0xfffff000fe310000, 0x900);}
-        // }
         
         // 处理命令完成
         if (status & (EMMC_INT_ERROR as u16 | int_mask)) == int_mask {
@@ -305,7 +297,7 @@ impl EMmcHost {
             return Err(err);
         }
 
-        // 处理数据传输部分（如果有的话）
+        // 处理数据传输部分
         if cmd.data_present {
             debug!("Data transfer: cmd.data_present={}", cmd.data_present);
             if let Some(_buffer) = &mut data_buffer {

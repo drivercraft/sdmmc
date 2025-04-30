@@ -221,53 +221,55 @@ mod tests {
                     }
                 }
 
-                // // Test writing and reading back a block
-                // println!("Testing write and read back...");
-                // let test_block_addr = 100; // Use a safe block address for testing
+                // Test writing and reading back a block
+                println!("Testing write and read back...");
+                let test_block_addr = 100; // Use a safe block address for testing
 
-                // // Prepare test pattern data
-                // let mut write_buffer = DVec::zeros(512, 0x1000, Direction::ToDevice).unwrap();
-                // for i in 0..512 {
-                //     write_buffer.set(i, (i % 256) as u8);
-                // }
+                // Prepare test pattern data
+                let mut write_buffer = DVec::zeros(512, 0x1000, Direction::ToDevice).unwrap();
+                for i in 0..512 {
+                    write_buffer.set(i, (i % 256) as u8);
+                }
 
-                // // Write data
-                // match emmc.write_block(test_block_addr, &write_buffer) {
-                //     Ok(_) => {
-                //         println!("Successfully wrote to block {}!", test_block_addr);
+                // Write data
+                match emmc.write_block(test_block_addr, &write_buffer) {
+                    Ok(_) => {
+                        println!("Successfully wrote to block {}!", test_block_addr);
                         
-                //         // Read back data
-                //         let mut read_buffer = DVec::zeros(512, 0x1000, Direction::FromDevice).unwrap();
-                //         match emmc.read_block(test_block_addr, &mut read_buffer) {
-                //             Ok(_) => {
-                //                 println!("Successfully read back block {}!", test_block_addr);
+                        // Read back data
+                        let mut read_buffer = DVec::zeros(512, 0x1000, Direction::FromDevice).unwrap();
+                        match emmc.read_block(test_block_addr, &mut read_buffer) {
+                            Ok(_) => {
+                                println!("Successfully read back block {}!", test_block_addr);
                                 
-                //                 // Verify data consistency
-                //                 let mut data_match = true;
-                //                 for i in 0..512 {
-                //                     if write_buffer[i] != read_buffer[i] {
-                //                         data_match = false;
-                //                         println!("Data mismatch: offset {}, wrote {:02X}, read {:02X}",
-                //                                 i, write_buffer[i], read_buffer[i]);
-                //                         break;
-                //                     }
-                //                 }
+                                // Verify data consistency
+                                let mut data_match = true;
+                                for i in 0..512 {
+                                    if write_buffer[i] != read_buffer[i] {
+                                        data_match = false;
+                                        println!("Data mismatch: offset {}, wrote {:02X}, read {:02X}",
+                                                i, write_buffer[i], read_buffer[i]);
+                                        break;
+                                    }
+                                }
                                 
-                //                 if data_match {
-                //                     println!("Data verification successful: written and read data match perfectly!");
-                //                 } else {
-                //                     println!("Data verification failed: written and read data do not match!");
-                //                 }
-                //             },
-                //             Err(e) => {
-                //                 warn!("Failed to read back block: {:?}", e);
-                //             }
-                //         }
-                //     },
-                //     Err(e) => {
-                //         warn!("Block write failed: {:?}", e);
-                //     }
-                // }
+                                println!("First 16 bytes of read block: {:?}", read_buffer.to_vec());
+
+                                if data_match {
+                                    println!("Data verification successful: written and read data match perfectly!");
+                                } else {
+                                    println!("Data verification failed: written and read data do not match!");
+                                }
+                            },
+                            Err(e) => {
+                                warn!("Failed to read back block: {:?}", e);
+                            }
+                        }
+                    },
+                    Err(e) => {
+                        warn!("Block write failed: {:?}", e);
+                    }
+                }
 
                 // Test multi-block read
                 println!("Testing multi-block read...");
