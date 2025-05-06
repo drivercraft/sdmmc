@@ -4,9 +4,11 @@
 
 pub mod sdhci;
 pub mod emmc;
-mod err;
+pub mod err;
 
 use log::warn;
+
+pub const BLOCK_SIZE: usize = 512;
 
 pub unsafe fn dump_memory_region(addr: usize, size: usize) {
     let start_ptr = addr as *const u32;
@@ -19,7 +21,6 @@ pub unsafe fn dump_memory_region(addr: usize, size: usize) {
             warn!("\n0x{:08x}:", addr + i * 4);
         }
         
-        // 在unsafe块中读取内存
         let value = unsafe { *start_ptr.add(i) };
         warn!(" 0x{:08x}", value);
     }

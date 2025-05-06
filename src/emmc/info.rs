@@ -98,6 +98,22 @@ impl EMmcHost {
 
         Ok(card.capacity_blocks * 512)
     }
+
+    pub fn get_block_num(&self) -> u64 {
+        if let Some(card) = &self.card {
+            card.capacity_user
+        } else {
+            0
+        }
+    }
+
+    pub fn get_block_size(&self) -> usize {
+        if let Some(card) = &self.card {
+            card.block_size as usize
+        } else {
+            0
+        }
+    }
 }
 
 // EMmcCard 代理访问宏 - 为 Host 实现直接访问 Card 参数的方法

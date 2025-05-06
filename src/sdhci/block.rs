@@ -2,19 +2,9 @@
 
 use core::sync::atomic::{AtomicBool, Ordering};
 use crate::err::SdError;
-use log::{debug, info, warn};
+use log::{debug, warn};
 
 use super::{cmd::SdCommand, constant::*, CardType, SdHost};
-
-// Simple block device trait that could be used by a filesystem\
-#[allow(unused)]
-pub trait BlockDevice {
-    fn read_block(&self, block_addr: u32, buffer: &mut [u8]) -> Result<(), SdError>;
-    fn write_block(&self, block_addr: u32, buffer: &[u8]) -> Result<(), SdError>;
-    fn read_blocks(&self, block_addr: u32, blocks: u16, buffer: &mut [u8]) -> Result<(), SdError>;
-    fn write_blocks(&self, block_addr: u32, blocks: u16, buffer: &[u8]) -> Result<(), SdError>;
-    fn get_capacity(&self) -> Result<u64, SdError>;
-}
 
 // SD Card structure
 #[derive(Debug)]

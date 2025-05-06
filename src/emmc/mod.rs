@@ -13,7 +13,7 @@ pub mod clock;
 
 use core::fmt::Display;
 use aux::{generic_fls, lldiv, MMC_VERSION_1_2, MMC_VERSION_1_4, MMC_VERSION_2_2, MMC_VERSION_3, MMC_VERSION_4, MMC_VERSION_4_1, MMC_VERSION_4_2, MMC_VERSION_4_3, MMC_VERSION_4_41, MMC_VERSION_4_5, MMC_VERSION_5_0, MMC_VERSION_5_1, MMC_VERSION_UNKNOWN};
-use block::{DataBuffer, EMmcCard};
+use block::EMmcCard;
 use clock::emmc_get_clk;
 use constant::*;
 use cmd::*;
@@ -31,7 +31,7 @@ pub struct EMmcHost {
     clock_base: u32,
     voltages: u32,
     quirks: u32,
-    clock: u32,
+    // clock: u32,
     host_caps: u32,
     version: u16,
 }
@@ -51,7 +51,7 @@ impl EMmcHost {
             clock_base: 0,
             voltages: 0,
             quirks: 0,
-            clock: 0,
+            // clock: 0,
             host_caps: 0,
             version: 0,
         };
@@ -501,6 +501,8 @@ impl EMmcHost {
 
         self.mmc_set_capacity(0)?;
         self.mmc_change_freq()?;
+
+        self.set_initialized(true).unwrap();
 
         info!("eMMC initialization complete");
         Ok(())

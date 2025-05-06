@@ -171,37 +171,37 @@ impl EMmcHost {
     }
 
     /// 从卡中读取一个或多个数据块
-    pub fn read_blocks(&self, block_addr: u32, blocks: u16, buffer: &mut DVec<u8>) -> Result<(), SdError> {
+    pub fn read_blocks(&self, block_id: u32, blocks: u16, buffer: &mut DVec<u8>) -> Result<(), SdError> {
         // 验证缓冲区大小是否匹配请求的块数
         let expected_size = blocks as usize * 512;
         if buffer.len() != expected_size {
             return Err(SdError::IoError);
         }
         
-        // // Check if card is initialized
-        // let card = match &self.card {
-        //     Some(card) => card,
-        //     None => return Err(SdError::NoCard),
-        // };
+        // Check if card is initialized
+        let card = match &self.card {
+            Some(card) => card,
+            None => return Err(SdError::NoCard),
+        };
 
-        // // 根据卡的类型调整块地址（高容量卡使用块地址，标准容量卡使用字节地址）
-        // let card_addr = if card.state & MMC_STATE_HIGHCAPACITY != 0 {
-        //     block_addr  // 高容量卡：直接使用块地址
-        // } else {
-        //     block_addr * 512  // 标准容量卡：转换为字节地址
-        // };
+        // 根据卡的类型调整块地址（高容量卡使用块地址，标准容量卡使用字节地址）
+        let card_addr = if card.state & MMC_STATE_HIGHCAPACITY != 0 {
+            block_id  // 高容量卡：直接使用块地址
+        } else {
+            block_id * 512  // 标准容量卡：转换为字节地址
+        };
 
-        debug!("Reading {} blocks starting at address: {:#x}", blocks, block_addr);
+        debug!("Reading {} blocks starting at address: {:#x}", blocks, block_id);
 
         // 根据块数选择合适的命令
         if blocks == 1 {
             // 单块读取
-            let cmd = EMmcCommand::new(MMC_READ_SINGLE_BLOCK, block_addr, MMC_RSP_R1)
+            let cmd = EMmcCommand::new(MMC_READ_SINGLE_BLOCK, card_addr, MMC_RSP_R1)
                 .with_data(512, 1, true);
             self.send_command(&cmd, Some(DataBuffer::Read(buffer)))?;
         } else {
             // 多块读取
-            let cmd = EMmcCommand::new(MMC_READ_MULTIPLE_BLOCK, block_addr, MMC_RSP_R1)
+            let cmd = EMmcCommand::new(MMC_READ_MULTIPLE_BLOCK, card_addr, MMC_RSP_R1)
                 .with_data(512, blocks, true);
             
             self.send_command(&cmd, Some(DataBuffer::Read(buffer)))?;
@@ -215,7 +215,7 @@ impl EMmcHost {
     }
 
     // Write multiple blocks to the card
-    pub fn write_blocks(&self, block_addr: u32, blocks: u16, buffer: &DVec<u8>) -> Result<(), SdError> {
+    pub fn write_blocks(&self, block_id: u32, blocks: u16, buffer: &DVec<u8>) -> Result<(), SdError> {
         // 验证缓冲区大小是否匹配请求的块数
         let expected_size = blocks as usize * 512;
         if buffer.len() != expected_size {
@@ -227,21 +227,21 @@ impl EMmcHost {
             None => return Err(SdError::NoCard),
         };
     
-        // // Check if card is initialized
-        // if !card.initialized.load(Ordering::SeqCst) {
-        //     return Err(SdError::UnsupportedCard);
-        // }
+        // Check if card is initialized
+        if !card.initialized.load(Ordering::SeqCst) {
+            return Err(SdError::UnsupportedCard);
+        }
     
-        // // Check if card is write protected
-        // if self.is_write_protected() {
-        //     return Err(SdError::IoError);
-        // }
+        // Check if card is write protected
+        if self.is_write_protected() {
+            return Err(SdError::IoError);
+        }
     
         // Convert to byte address for standard capacity cards
         let card_addr = if card.state & MMC_STATE_HIGHCAPACITY != 0 {
-            block_addr  // 高容量卡：直接使用块地址
+            block_id  // 高容量卡：直接使用块地址
         } else {
-            block_addr * 512  // 标准容量卡：转换为字节地址
+            block_id * 512  // 标准容量卡：转换为字节地址
         };
     
         debug!("Writing {} blocks starting at address: {:#x}", blocks, card_addr);
