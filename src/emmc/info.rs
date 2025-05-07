@@ -101,7 +101,7 @@ impl EMmcHost {
 
     pub fn get_block_num(&self) -> u64 {
         if let Some(card) = &self.card {
-            card.capacity_user
+            card.capacity_user / 512
         } else {
             0
         }
@@ -109,7 +109,7 @@ impl EMmcHost {
 
     pub fn get_block_size(&self) -> usize {
         if let Some(card) = &self.card {
-            card.block_size as usize
+            1 << (card.read_bl_len as usize)
         } else {
             0
         }

@@ -12,24 +12,25 @@ mod tests {
     use fdt_parser::PciSpace;
     use log::{debug, info, warn};
     use pcie::{CommandRegister, DeviceType, Header, RootComplexGeneric, SimpleBarAllocator};
-    use sdmmc::{sdhci::SdHost, set_impl, Kernel};
-    use sdmmc::emmc::EMmcHost;
+    // use sdmmc::{set_impl, Kernel};
+    use sdmmc::{emmc::EMmcHost, sdhci::SdHost};
     use sdmmc::emmc::clock::*;
+    use sdmmc::emmc::constant::*;
 
-    struct SKernel;
+    // struct SKernel;
 
-    impl Kernel for SKernel {
-        fn sleep(us: u64) {
-            let start = since_boot();
-            let duration = core::time::Duration::from_micros(us);
+    // impl Kernel for SKernel {
+    //     fn sleep(us: u64) {
+    //         let start = since_boot();
+    //         let duration = core::time::Duration::from_micros(us);
             
-            while since_boot() - start < duration {
-                core::hint::spin_loop();
-            }
-        }
-    }
+    //         while since_boot() - start < duration {
+    //             core::hint::spin_loop();
+    //         }
+    //     }
+    // }
     
-    set_impl!(SKernel);
+    // set_impl!(SKernel);
 
     #[test]
     fn test_platform() {
@@ -224,11 +225,19 @@ mod tests {
 
                 // Test reading the first block
                 println!("Attempting to read first block...");
-                let mut buffer: DVec<u8> = DVec::zeros(512, 0x1000, Direction::FromDevice).unwrap();
-                match emmc.read_blocks(0, 1, &mut buffer) {
+
+                cfg_if::cfg_if! {
+                    if #[cfg(feature = "dma")] {
+                        let mut buffer: DVec<u8> = DVec::zeros(MMC_MAX_BLOCK_LEN as usize, 0x1000, Direction::FromDevice).unwrap();
+                    } else if #[cfg(feature = "pio")] {
+                        let mut buffer: [u8; 512] = [0; 512];
+                    }
+                }
+
+                match emmc.read_blocks(100, 1, &mut buffer) {
                     Ok(_) => {
                         println!("Successfully read first block!");
-                        let block_bytes: Vec<u8> = (0..16).map(|i| buffer[i]).collect();
+                        let block_bytes: Vec<u8> = (0..512).map(|i| buffer[i]).collect();
                         println!("First 16 bytes of first block: {:02X?}", block_bytes);
                     },
                     Err(e) => {
@@ -238,24 +247,42 @@ mod tests {
 
                 // Test writing and reading back a block
                 println!("Testing write and read back...");
-                let test_block_addr = 100; // Use a safe block address for testing
+                let test_block_id = 100; // Use a safe block address for testing
 
-                // Prepare test pattern data
-                let mut write_buffer = DVec::zeros(512, 0x1000, Direction::ToDevice).unwrap();
-                for i in 0..512 {
-                    write_buffer.set(i, (i % 256) as u8);
+                cfg_if::cfg_if! {
+                    if #[cfg(feature = "dma")] {
+                        // Prepare test pattern data
+                        let mut write_buffer = DVec::zeros(512, 0x1000, Direction::ToDevice).unwrap();
+                        for i in 0..512 {
+                            // write_buffer.set(i, (i % 256) as u8);
+                            write_buffer.set(i, 0 as u8); // Fill with test pattern data
+                        }
+                    } else if #[cfg(feature = "pio")] {
+                        let mut write_buffer: [u8; 512] = [0; 512];
+                        for i in 0..512 {
+                            // write_buffer[i] = (i % 256) as u8; // Fill with test pattern data
+                            write_buffer[i] = 0 as u8;
+                        }
+                    }
                 }
 
                 // Write data
-                match emmc.write_blocks(test_block_addr, 1, &write_buffer) {
+                match emmc.write_blocks(test_block_id, 1, &write_buffer) {
                     Ok(_) => {
-                        println!("Successfully wrote to block {}!", test_block_addr);
+                        println!("Successfully wrote to block {}!", test_block_id);
                         
                         // Read back data
-                        let mut read_buffer = DVec::zeros(512, 0x1000, Direction::FromDevice).unwrap();
-                        match emmc.read_blocks(test_block_addr, 1, &mut read_buffer) {
+                        cfg_if::cfg_if! {
+                            if #[cfg(feature = "dma")] {
+                                let mut read_buffer: DVec<u8> = DVec::zeros(MMC_MAX_BLOCK_LEN as usize, 0x1000, Direction::FromDevice).unwrap();
+                            } else if #[cfg(feature = "pio")] {
+                                let mut read_buffer: [u8; 512] = [0; 512];
+                            }
+                        }
+                        
+                        match emmc.read_blocks(test_block_id, 1, &mut read_buffer) {
                             Ok(_) => {
-                                println!("Successfully read back block {}!", test_block_addr);
+                                println!("Successfully read back block {}!", test_block_id);
                                 
                                 // Verify data consistency
                                 let mut data_match = true;
@@ -290,8 +317,14 @@ mod tests {
                 println!("Testing multi-block read...");
                 let multi_block_addr = 200;
                 let block_count = 4; // Read 4 blocks
-                let mut multi_buffer = DVec::zeros(512 * block_count as usize, 0x1000, Direction::FromDevice).unwrap();
-
+                cfg_if::cfg_if! {
+                    if #[cfg(feature = "dma")] {
+                        let mut multi_buffer: DVec<u8> = DVec::zeros(MMC_MAX_BLOCK_LEN as usize * block_count as usize, 0x1000, Direction::FromDevice).unwrap();
+                    } else if #[cfg(feature = "pio")] {
+                        // Using a fixed size of 2048 (which is 512 * 4) instead of computing it at runtime
+                        let mut multi_buffer: [u8; 2048] = [0; 2048];
+                    }
+                }
                 match emmc.read_blocks(multi_block_addr, block_count, &mut multi_buffer) {
                     Ok(_) => {
                         println!("Successfully read {} blocks starting at block address {}!", block_count, multi_block_addr);

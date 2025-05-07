@@ -150,30 +150,48 @@ impl EMmcHost {
                 mode |= EMMC_TRNS_READ;
             }
 
-            // Configure transfer mode
-            self.write_reg16(EMMC_XFER_MODE, mode);
+            #[cfg(feature = "dma")] 
+            {
+                // Configure transfer mode
+                self.write_reg16(EMMC_XFER_MODE, mode);
 
-            match data_buffer {
-                Some(DataBuffer::Read(ref read_buf)) if cmd.data_dir_read => {
-                    let ptr = read_buf.bus_addr() as usize;
+                match data_buffer {
+                    Some(DataBuffer::Read(ref read_buf)) if cmd.data_dir_read => {
+                        let ptr = read_buf.bus_addr() as usize;
 
-                    debug!("Read buffer address: {:#x}", ptr);
-                    self.write_reg(EMMC_SDMASA, ptr as u32);
-                },
-                Some(DataBuffer::Write(write_buf)) if !cmd.data_dir_read => {
-                    let ptr = write_buf.as_ptr() as usize;
-                    let start_addr = ptr as u32;
-                    self.write_reg(EMMC_SDMASA, start_addr);
-                },
-                _ => return Err(SdError::InvalidArgument),
+                        debug!("Read buffer address: {:#x}", ptr);
+                        self.write_reg(EMMC_SDMASA, ptr as u32);
+                    },
+                    Some(DataBuffer::Write(write_buf)) if !cmd.data_dir_read => {
+                        let ptr = write_buf.as_ptr() as usize;
+                        let start_addr = ptr as u32;
+                        self.write_reg(EMMC_SDMASA, start_addr);
+                    },
+                    _ => return Err(SdError::InvalidArgument),
+                }
+                
+                mode |= EMMC_TRNS_DMA;
+
+                // Set block size and count
+                self.write_reg16(EMMC_BLOCK_SIZE, (((EMMC_DEFAULT_BOUNDARY_ARG & 0x7) << 12) | (cmd.block_size & 0xFFF)).try_into().unwrap());
+                self.write_reg16(EMMC_BLOCK_COUNT, cmd.block_count);
+                self.write_reg16(EMMC_XFER_MODE, mode);                
             }
             
-            mode |= EMMC_TRNS_DMA;
+            #[cfg(feature = "pio")]
+            {
+                self.write_reg16(EMMC_BLOCK_SIZE, (cmd.block_size & 0xFFF).try_into().unwrap());
+                self.write_reg16(EMMC_BLOCK_COUNT, cmd.block_count);
 
-            // Set block size and count
-            self.write_reg16(EMMC_BLOCK_SIZE, (((EMMC_DEFAULT_BOUNDARY_ARG & 0x7) << 12) | (cmd.block_size & 0xFFF)).try_into().unwrap());
-            self.write_reg16(EMMC_BLOCK_COUNT, cmd.block_count);
-            self.write_reg16(EMMC_XFER_MODE, mode);
+                self.write_reg16(EMMC_XFER_MODE, mode);
+                match data_buffer {
+                    Some(DataBuffer::Read(_)) if cmd.data_dir_read => {
+                    },
+                    Some(DataBuffer::Write(_)) if !cmd.data_dir_read => {
+                    },
+                    _ => return Err(SdError::InvalidArgument),
+                }
+            } 
         } else if cmd.resp_type & MMC_RSP_BUSY != 0 {
             // For commands with BUSY but no data, still set timeout control
             self.write_reg8(EMMC_TIMEOUT_CONTROL, 0xe);
@@ -298,8 +316,15 @@ impl EMmcHost {
         // Process data transfer part
         if cmd.data_present {
             debug!("Data transfer: cmd.data_present={}", cmd.data_present);
-            if let Some(_buffer) = &mut data_buffer {
+            if let Some(buffer) = &mut data_buffer {
+                #[cfg(feature = "dma")]
                 self.transfer_data_by_dma()?;
+
+                #[cfg(feature = "pio")]
+                match buffer {
+                    DataBuffer::Read(buf) => self.read_buffer(buf)?,
+                    DataBuffer::Write(buf) => self.write_buffer(buf)?,
+                }
             } else {
                 return Err(SdError::InvalidArgument);
             }
@@ -487,7 +512,22 @@ impl EMmcHost {
         Ok(card.csd)
     }
 
+    #[cfg(feature = "dma")]
     pub fn mmc_send_ext_csd(&mut self, ext_csd: &mut DVec<u8>) -> Result<(), SdError> {
+        let cmd = EMmcCommand::new(MMC_SEND_EXT_CSD, 0, MMC_RSP_R1)
+            .with_data(MMC_MAX_BLOCK_LEN as u16, 1, true);
+        
+        self.send_command(&cmd, Some(DataBuffer::Read(ext_csd)))?;
+
+        debug!("CMD8: {:#x}",self.get_response().as_r1());
+        
+        debug!("EXT_CSD read successfully, rev: {}", ext_csd[EXT_CSD_REV as usize]);
+        
+        Ok(())
+    }
+
+    #[cfg(feature = "pio")]
+    pub fn mmc_send_ext_csd(&mut self, ext_csd: &mut [u8; 512]) -> Result<(), SdError> {
         let cmd = EMmcCommand::new(MMC_SEND_EXT_CSD, 0, MMC_RSP_R1)
             .with_data(MMC_MAX_BLOCK_LEN as u16, 1, true);
         

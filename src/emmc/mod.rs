@@ -3,11 +3,11 @@ extern crate alloc;
 mod cmd;
 mod block;
 mod config;
-mod constant;
 mod rockchip;
 mod regs;
 mod info;
 
+pub mod constant;
 pub mod aux;
 pub mod clock;
 
@@ -334,7 +334,14 @@ impl EMmcHost {
         if is_version_4_plus {
             self.mmc_select_hs()?;
             self.mmc_set_clock(MMC_HIGH_52_MAX_DTR);
-            let mut ext_csd: DVec<u8> = DVec::zeros(512, 0x1000, Direction::FromDevice).unwrap();
+            
+            cfg_if::cfg_if! {
+                if #[cfg(feature = "dma")] {
+                    let mut ext_csd: DVec<u8> = DVec::zeros(MMC_MAX_BLOCK_LEN as usize, 0x1000, Direction::FromDevice).unwrap();
+                } else if #[cfg(feature = "pio")] {
+                    let mut ext_csd: [u8; 512] = [0; 512];
+                }
+            }
 
             self.mmc_send_ext_csd(&mut ext_csd)?;
 
@@ -503,6 +510,11 @@ impl EMmcHost {
         self.mmc_change_freq()?;
 
         self.set_initialized(true).unwrap();
+        
+        info!("eMMC version: {:#x}", self.version);
+        info!("{:?}", self.write_bl_len());
+        info!("{:?}", self.read_bl_len());
+        info!("eMMC capacity: {}", self.capacity().unwrap());
 
         info!("eMMC initialization complete");
         Ok(())
@@ -540,16 +552,19 @@ impl EMmcHost {
 
         let capacity = self.capacity().unwrap_or(0);
         let read_bl_len = self.read_bl_len().unwrap_or(0);
-        let _lba = lldiv(capacity, read_bl_len); 
+        let _lba = lldiv(capacity, read_bl_len);
 
         Ok(())
     }
 
     pub fn mmc_change_freq(&mut self) -> Result<(), SdError> {
-        // // 分配对齐的缓冲区用于ext_csd
-        let mut ext_csd = DVec::zeros(MMC_MAX_BLOCK_LEN as usize, 0x1000, Direction::FromDevice)
-            .ok_or(SdError::MemoryError)?;
-        
+        cfg_if::cfg_if! {
+            if #[cfg(feature = "dma")] {
+                let mut ext_csd: DVec<u8> = DVec::zeros(MMC_MAX_BLOCK_LEN as usize, 0x1000, Direction::FromDevice).unwrap();
+            } else if #[cfg(feature = "pio")] {
+                let mut ext_csd: [u8; 512] = [0; 512];
+            }
+        }
         // 初始化卡能力标志
         self.set_card_caps(0).unwrap();
         
@@ -667,10 +682,16 @@ impl EMmcHost {
             MMC_BUS_WIDTH_4BIT,
         ];
 
-        let mut ext_csd = DVec::zeros(MMC_MAX_BLOCK_LEN as usize, 0x1000, Direction::FromDevice)
-            .ok_or(SdError::MemoryError)?;
-        let mut test_csd = DVec::zeros(MMC_MAX_BLOCK_LEN as usize, 0x1000, Direction::FromDevice)
-            .ok_or(SdError::MemoryError)?;
+        cfg_if::cfg_if! {
+            if #[cfg(feature = "dma")] {
+                let mut ext_csd: DVec<u8> = DVec::zeros(MMC_MAX_BLOCK_LEN as usize, 0x1000, Direction::FromDevice).unwrap();
+                let mut test_csd = DVec::zeros(MMC_MAX_BLOCK_LEN as usize, 0x1000, Direction::FromDevice)
+        .ok_or(SdError::MemoryError)?;
+            } else if #[cfg(feature = "pio")] {
+                let mut ext_csd: [u8; 512] = [0; 512];
+                let mut test_csd: [u8; 512] = [0; 512];
+            }
+        }
 
         // 版本检查和主机能力检查
         if self.version().unwrap_or(0) < MMC_VERSION_4 || 
@@ -722,7 +743,19 @@ impl EMmcHost {
         Err(SdError::BadMessage)
     }
 
+    #[cfg(feature = "dma")]
     fn compare_sector_count(&self, ext_csd: &DVec<u8>, test_csd: &DVec<u8>) -> bool {
+        let sec_cnt_offset = EXT_CSD_SEC_CNT as usize;
+        for i in 0..4 {
+            if ext_csd[sec_cnt_offset + i] != test_csd[sec_cnt_offset + i] {
+                return false;
+            }
+        }
+        true
+    }
+
+    #[cfg(feature = "pio")]
+    fn compare_sector_count(&self, ext_csd: &[u8], test_csd: &[u8]) -> bool {
         let sec_cnt_offset = EXT_CSD_SEC_CNT as usize;
         for i in 0..4 {
             if ext_csd[sec_cnt_offset + i] != test_csd[sec_cnt_offset + i] {
@@ -814,7 +847,53 @@ impl EMmcHost {
 		(timing == MMC_TIMING_MMC_HS400) || (timing == MMC_TIMING_MMC_HS400ES)
     }
 
+    #[cfg(feature = "dma")]
     pub fn mmc_select_card_type(&self, ext_csd: &DVec<u8>) -> u16 {
+        let card_type = ext_csd[EXT_CSD_CARD_TYPE as usize] as u16;
+        let host_caps = self.host_caps;
+        let mut avail_type = 0;
+
+        if (host_caps & MMC_MODE_HS != 0) &&
+           (card_type & EXT_CSD_CARD_TYPE_26 != 0) {
+            avail_type |= EXT_CSD_CARD_TYPE_26;
+        }
+
+        if (host_caps & MMC_MODE_HS != 0) &&
+           (card_type & EXT_CSD_CARD_TYPE_52 != 0) {
+            avail_type |= EXT_CSD_CARD_TYPE_52;
+        }
+
+        if (host_caps & MMC_MODE_DDR_52MHZ != 0) &&
+           (card_type & EXT_CSD_CARD_TYPE_DDR_1_8V as u16 != 0) {
+            avail_type |= EXT_CSD_CARD_TYPE_DDR_1_8V as u16;
+        }
+
+        if (host_caps & MMC_MODE_HS200 != 0) &&
+           (card_type & EXT_CSD_CARD_TYPE_HS200_1_8V != 0) {
+            avail_type |= EXT_CSD_CARD_TYPE_HS200_1_8V;
+        }
+
+        if (host_caps & MMC_MODE_HS400 != 0) &&
+           (host_caps & MMC_MODE_8BIT != 0) &&
+           (card_type & EXT_CSD_CARD_TYPE_HS400_1_8V != 0) {
+            avail_type |= EXT_CSD_CARD_TYPE_HS200_1_8V |
+                          EXT_CSD_CARD_TYPE_HS400_1_8V;
+        }
+
+        if (host_caps & MMC_MODE_HS400ES != 0) &&
+           (host_caps & MMC_MODE_8BIT != 0) &&
+           (ext_csd[EXT_CSD_STROBE_SUPPORT as usize] != 0) &&
+           (avail_type & EXT_CSD_CARD_TYPE_HS400_1_8V != 0) {
+            avail_type |= EXT_CSD_CARD_TYPE_HS200_1_8V |
+                          EXT_CSD_CARD_TYPE_HS400_1_8V |
+                          EXT_CSD_CARD_TYPE_HS400ES;
+        }
+
+        avail_type
+    }
+
+    #[cfg(feature = "pio")]
+    pub fn mmc_select_card_type(&self, ext_csd: &[u8]) -> u16 {
         let card_type = ext_csd[EXT_CSD_CARD_TYPE as usize] as u16;
         let host_caps = self.host_caps;
         let mut avail_type = 0;
