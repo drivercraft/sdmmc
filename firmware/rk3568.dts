@@ -3359,7 +3359,7 @@
 		interrupts = <0x00 0x63 0x04>;
 		max-frequency = <0x8f0d180>;
 		clocks = <0x23 0xb2 0x23 0xb3 0x23 0x18c 0x23 0x18d>;
-		clock-names = "biu\0ciu\0ciu-drive\0ciu-sample";
+		clock-fdd20000 = "biu\0ciu\0ciu-drive\0ciu-sample";
 		fifo-depth = <0x100>;
 		resets = <0x23 0xd6>;
 		reset-names = "reset";

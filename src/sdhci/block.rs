@@ -2,18 +2,9 @@
 
 use core::sync::atomic::{AtomicBool, Ordering};
 use crate::err::SdError;
+use log::{debug, warn};
 
 use super::{cmd::SdCommand, constant::*, CardType, SdHost};
-
-// Simple block device trait that could be used by a filesystem\
-#[allow(unused)]
-pub trait BlockDevice {
-    fn read_block(&self, block_addr: u32, buffer: &mut [u8]) -> Result<(), SdError>;
-    fn write_block(&self, block_addr: u32, buffer: &[u8]) -> Result<(), SdError>;
-    fn read_blocks(&self, block_addr: u32, blocks: u16, buffer: &mut [u8]) -> Result<(), SdError>;
-    fn write_blocks(&self, block_addr: u32, blocks: u16, buffer: &[u8]) -> Result<(), SdError>;
-    fn get_capacity(&self) -> Result<u64, SdError>;
-}
 
 // SD Card structure
 #[derive(Debug)]
@@ -51,6 +42,8 @@ impl SdCard {
 impl SdHost {
     // Read a block from the card
     pub fn read_block(&self, block_addr: u32, buffer: &mut [u8]) -> Result<(), SdError> {
+        debug!("read block start");
+        debug!("block_addr is 0x{:x}", block_addr);
         if buffer.len() != 512 {
             return Err(SdError::IoError);
         }
@@ -79,13 +72,14 @@ impl SdHost {
 
         // Read data from buffer register
         self.read_buffer(buffer)?;
-
+        debug!("read block completed");
         Ok(())
     }
 
     // Read data from the buffer register
     fn read_buffer(&self, buffer: &mut [u8]) -> Result<(), SdError> {
         // Wait for data available
+        debug!("read buffer start");
         let mut timeout = 100000;
         while timeout > 0 {
             let int_status = self.read_reg(SDHCI_INT_STATUS);
@@ -104,6 +98,7 @@ impl SdHost {
         }
         
         if timeout == 0 {
+            warn!("read buffer timeout");
             return Err(SdError::DataTimeout);
         }
 
@@ -127,7 +122,7 @@ impl SdHost {
                 buffer[i + 3] = ((val >> 24) & 0xFF) as u8;
             }
         }
-
+        debug!("read buffer completed");
         Ok(())
     }
 

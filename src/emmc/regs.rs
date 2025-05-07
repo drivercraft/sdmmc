@@ -1,92 +1,60 @@
 #![allow(dead_code)]
 
-pub struct OCRRegister {
+use super::EMmcHost;
 
-}
+impl EMmcHost {
+    // Read a 32-bit register
+    pub fn read_reg(&self, offset: u32) -> u32 {
+        unsafe { core::ptr::read_volatile((self.base_addr + offset as usize) as *const u32) }
+    }
 
-impl OCRRegister {
-    pub fn from_bytes(_bytes: &[u32; 4]) -> Self {
-        todo!()
+    // Read a 16-bit register
+    pub fn read_reg16(&self, offset: u32) -> u16 {
+        unsafe { core::ptr::read_volatile((self.base_addr + offset as usize) as *const u16) }
+    }
+
+    // Read an 8-bit register
+    pub fn read_reg8(&self, offset: u32) -> u8 {
+        unsafe { core::ptr::read_volatile((self.base_addr + offset as usize) as *const u8) }
+    }
+
+    // Write a 32-bit register
+    pub fn write_reg(&self, offset: u32, value: u32) {
+        unsafe { core::ptr::write_volatile((self.base_addr + offset as usize) as *mut u32, value) }
+    }
+
+    // Write a 16-bit register
+    pub fn write_reg16(&self, offset: u32, value: u16) {
+        unsafe { core::ptr::write_volatile((self.base_addr + offset as usize) as *mut u16, value) }
+    }
+
+    // Write an 8-bit register
+    pub fn write_reg8(&self, offset: u32, value: u8) {
+        unsafe { core::ptr::write_volatile((self.base_addr + offset as usize) as *mut u8, value) }
     }
 }
 
-pub struct CIDRegister {
-    manufacturer_id: u8,
-    device: u8,
-    application_id: u16,
-    name: [u8; 6],
-    revision: u8,
-    serial_number: u32,
-    manufacturing_date: u16,
-    crc7_checksum: u8,
-}
-
-impl CIDRegister {
-    pub fn from_bytes(_bytes: &[u32; 4]) -> Self {
-        todo!()
-    }
-}
-
-pub struct CSDRegister {
+struct CSDRegister {
     csd_structure: u8,
-    system_specification_version: u8,
-    data_read_access_time1: u8,
-    data_read_access_time2: u8,
-    max_bus_clock_frequency: u8,
-    device_command_classes: u8,
-    partial_blocks_write_allowed: u8,
-    write_block_misalignment: u8,
-    read_block_misalignment: u8,
-    dsr_implemented: u8,
+    spec_version: u8,
     device_size: u16,
-    max_read_current_min: u8,  
-    max_read_current_max: u8, 
-    max_write_current_min: u8,
-    max_write_current_max: u8,
-    device_size_multiplier: u8,
-    erase_group_size: u8,
-    erase_group_size_multiplier: u8,
-    write_protect_group_size: u8,
-    write_protect_group_enable: u8,
-    manufacturer_default_ecc: u8,
-    write_speed_factor: u8,
-    max_write_data_block_length: u8,
-    partial_blocks_for_write_allowed: u8,
-    content_protect_application: u8,
-    file_format_group: u8,
-    copy_flags: u8,
-    perm_write_protect: u8,
-    temp_write_protect: u8,
-    file_format: u8,
-    ecc_code: u8,
-    crc: u8,
+    devoce_size_mult: u8,
+    read_bl_len: u8,
 }
 
 impl CSDRegister {
-    pub fn from_bytes(_bytes: &[u32; 4]) -> Self {
-        todo!()
+    fn new(csd: &[u32; 4]) -> Self {
+        let csd_structure = (csd[3] >> 30) as u8;
+        let spec_version = ((csd[3] >> 26) & 0xF) as u8;
+        let device_size = (((csd[2] & 0x3FF) << 2) | ((csd[1] >> 30) & 0x3)) as u16;
+        let devoce_size_mult = ((csd[1] >> 15) & 0x7) as u8;
+        let read_bl_len = ((csd[2] >> 8) & 0xF) as u8;
+        CSDRegister {
+            csd_structure,
+            spec_version,
+            device_size,
+            devoce_size_mult,
+            read_bl_len,
+        }
     }
 }
-
-pub struct ExtCSDRegister {
-    
-}
-
-impl ExtCSDRegister {
-    pub fn from_bytes(_bytes: &[u32; 4]) -> Self {
-        todo!()
-    }
-}
-
-pub struct  RCARegister {
-
-}
-
-pub struct DSRRegister {
-
-}
-
-pub struct QSR {
-
-}
-
