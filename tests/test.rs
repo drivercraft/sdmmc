@@ -13,7 +13,7 @@ mod tests {
     use log::{debug, info, warn};
     use pcie::{CommandRegister, DeviceType, Header, RootComplexGeneric, SimpleBarAllocator};
     // use sdmmc::{set_impl, Kernel};
-    use sdmmc::{emmc::EMmcHost, sdhci::SdHost};
+    use sdmmc::emmc::EMmcHost;
     use sdmmc::emmc::clock::*;
     use sdmmc::emmc::constant::*;
 
@@ -123,7 +123,7 @@ mod tests {
 
                 // Test writing and reading back a block
                 println!("Testing write and read back...");
-                let test_block_id = 100; // Use a safe block address for testing
+                let test_block_id = 0x3; // Use a safe block address for testing
 
                 cfg_if::cfg_if! {
                     if #[cfg(feature = "dma")] {
