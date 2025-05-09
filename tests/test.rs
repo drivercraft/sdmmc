@@ -9,28 +9,26 @@ mod tests {
     use alloc::vec::Vec;
     use bare_test::{globals::{global_val, PlatformInfoKind}, mem::iomap, platform::page_size, println, time::since_boot};
     use dma_api::{DVec, Direction};
-    use fdt_parser::PciSpace;
     use log::{debug, info, warn};
-    use pcie::{CommandRegister, DeviceType, Header, RootComplexGeneric, SimpleBarAllocator};
-    // use sdmmc::{set_impl, Kernel};
+    use sdmmc::{set_impl, Kernel};
     use sdmmc::emmc::EMmcHost;
     use sdmmc::emmc::clock::*;
     use sdmmc::emmc::constant::*;
 
-    // struct SKernel;
+    struct SKernel;
 
-    // impl Kernel for SKernel {
-    //     fn sleep(us: u64) {
-    //         let start = since_boot();
-    //         let duration = core::time::Duration::from_micros(us);
+    impl Kernel for SKernel {
+        fn sleep(us: u64) {
+            let start = since_boot();
+            let duration = core::time::Duration::from_micros(us);
             
-    //         while since_boot() - start < duration {
-    //             core::hint::spin_loop();
-    //         }
-    //     }
-    // }
+            while since_boot() - start < duration {
+                core::hint::spin_loop();
+            }
+        }
+    }
     
-    // set_impl!(SKernel);
+    set_impl!(SKernel);
 
     #[test]
     fn test_platform() {
@@ -51,25 +49,25 @@ mod tests {
     fn test_uboot(fdt: &fdt_parser::Fdt) {
         let emmc = fdt.find_compatible(&["rockchip,dwcmshc-sdhci"]).next().unwrap();
         let clock = fdt.find_compatible(&["rockchip,rk3568-cru"]).next().unwrap();
-        let syscon = fdt.find_compatible(&["rockchip,rk3568-grf"]).next().unwrap();
+        // let syscon = fdt.find_compatible(&["rockchip,rk3568-grf"]).next().unwrap();
 
-        info!("EMMC: {} Clock: {}, Syscon {}", emmc.name, clock.name, syscon.name);
+        info!("EMMC: {} Clock: {}", emmc.name, clock.name);
         
         let emmc_reg = emmc.reg().unwrap().next().unwrap();
         let clk_reg = clock.reg().unwrap().next().unwrap();
-        let syscon_reg = syscon.reg().unwrap().next().unwrap();
+        // let syscon_reg = syscon.reg().unwrap().next().unwrap();
         
         println!("EMMC reg {:#x}, {:#x}", emmc_reg.address, emmc_reg.size.unwrap());
         println!("Clock reg {:#x}, {:#x}", clk_reg.address, clk_reg.size.unwrap());
-        println!("Syscon reg {:#x}, {:#x}", syscon_reg.address, syscon_reg.size.unwrap());
+        // println!("Syscon reg {:#x}, {:#x}", syscon_reg.address, syscon_reg.size.unwrap());
         
         let emmc_addr_ptr = iomap((emmc_reg.address as usize).into(), emmc_reg.size.unwrap());
         let clk_add_ptr = iomap((clk_reg.address as usize).into(), clk_reg.size.unwrap());
-        let syscon_addr_ptr = iomap((syscon_reg.address as usize).into(), syscon_reg.size.unwrap());
+        // let syscon_addr_ptr = iomap((syscon_reg.address as usize).into(), syscon_reg.size.unwrap());
         
         let emmc_addr = emmc_addr_ptr.as_ptr() as usize;
         let clk_addr = clk_add_ptr.as_ptr() as usize;
-        let syscon_addr = syscon_addr_ptr.as_ptr() as usize;
+        // let syscon_addr = syscon_addr_ptr.as_ptr() as usize;
 
         test_emmc(emmc_addr, clk_addr);
 
@@ -110,7 +108,7 @@ mod tests {
                     }
                 }
 
-                match emmc.read_blocks(100, 1, &mut buffer) {
+                match emmc.read_blocks(5034498, 1, &mut buffer) {
                     Ok(_) => {
                         println!("Successfully read first block!");
                         let block_bytes: Vec<u8> = (0..512).map(|i| buffer[i]).collect();
@@ -201,6 +199,7 @@ mod tests {
                         let mut multi_buffer: [u8; 2048] = [0; 2048];
                     }
                 }
+                
                 match emmc.read_blocks(multi_block_addr, block_count, &mut multi_buffer) {
                     Ok(_) => {
                         println!("Successfully read {} blocks starting at block address {}!", block_count, multi_block_addr);

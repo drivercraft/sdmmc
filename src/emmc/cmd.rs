@@ -124,11 +124,6 @@ impl EMmcHost {
         self.write_reg16(EMMC_NORMAL_INT_STAT, 0xFFFF);
         self.write_reg16(EMMC_ERROR_INT_STAT, 0xFFFF);
 
-        info!(
-            "Sending command: opcode={:#x}, arg={:#x}, resp_type={:#x}",
-            cmd.opcode, cmd.arg, cmd.resp_type
-        );
-
         let mut int_mask = EMMC_INT_RESPONSE as u16;
         
         // If data is present and the response type includes the BUSY flag, wait for data end interrupt
@@ -232,8 +227,11 @@ impl EMmcHost {
             command |= EMMC_CMD_DATA;
         }
 
-        info!("Sending command: {:#x}", command);
-    
+        info!(
+            "Sending command: opcode={:#x}, arg={:#x}, resp_type={:#x}, command={:#x}",
+            cmd.opcode, cmd.arg, cmd.resp_type, command
+        );
+
         // Special command handling
         let mut timeout_val = if cmd.opcode == MMC_GO_IDLE_STATE || cmd.opcode == MMC_SEND_OP_COND {
             CMD_MAX_TIMEOUT
@@ -420,7 +418,7 @@ impl EMmcHost {
         let cmd_arg = ocr_hcs | (self.voltages & (card_ocr & ocr_voltage_mask)) | 
                         (card_ocr & ocr_access_mode);
 
-        info!("eMMC CMD1 arg for retries: {:#x}", cmd_arg);
+        // info!("eMMC CMD1 arg for retries: {:#x}", cmd_arg);
 
         // Now retry with the proper argument until ready or timeout
         let mut ready = false;
@@ -465,7 +463,8 @@ impl EMmcHost {
         
         debug!("Clock control before CMD2: 0x{:x}, stable: {}", 
             self.read_reg16(EMMC_CLOCK_CONTROL),
-            self.is_clock_stable());
+            self.is_clock_stable()
+        );
         
         Ok(card_ocr)
     }
@@ -491,7 +490,7 @@ impl EMmcHost {
         let cmd = EMmcCommand::new(MMC_SET_RELATIVE_ADDR, rca << 16, MMC_RSP_R1);
         self.send_command(&cmd,None)?;
 
-        info!("cmd3 0x{:x}", self.get_response().as_r1());
+        // info!("cmd3 0x{:x}", self.get_response().as_r1());
 
         Ok(())
     }
@@ -519,9 +518,8 @@ impl EMmcHost {
         
         self.send_command(&cmd, Some(DataBuffer::Read(ext_csd)))?;
 
-        debug!("CMD8: {:#x}",self.get_response().as_r1());
-        
-        debug!("EXT_CSD read successfully, rev: {}", ext_csd[EXT_CSD_REV as usize]);
+        // debug!("CMD8: {:#x}",self.get_response().as_r1());
+        // debug!("EXT_CSD read successfully, rev: {}", ext_csd[EXT_CSD_REV as usize]);
         
         Ok(())
     }
@@ -533,9 +531,8 @@ impl EMmcHost {
         
         self.send_command(&cmd, Some(DataBuffer::Read(ext_csd)))?;
 
-        debug!("CMD8: {:#x}",self.get_response().as_r1());
-        
-        debug!("EXT_CSD read successfully, rev: {}", ext_csd[EXT_CSD_REV as usize]);
+        // debug!("CMD8: {:#x}",self.get_response().as_r1());
+        // debug!("EXT_CSD read successfully, rev: {}", ext_csd[EXT_CSD_REV as usize]);
         
         Ok(())
     }

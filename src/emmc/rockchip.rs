@@ -251,7 +251,7 @@ impl EMmcHost {
             let extra = DWCMSHC_EMMC_DLL_DLYENA |
                         DLL_STRBIN_DELAY_NUM_SEL |
                         (ddr50_strbin_delay_num << DLL_STRBIN_DELAY_NUM_OFFSET);
-            info!("extra: {:#b}", extra);
+            // info!("extra: {:#b}", extra);
             self.write_reg(DWCMSHC_EMMC_DLL_STRBIN, extra);
         }
 

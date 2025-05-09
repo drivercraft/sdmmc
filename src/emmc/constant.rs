@@ -1,4 +1,4 @@
-#![allow(unused)]
+// #![allow(unused)]
 
 // EMMC register offsets
 pub const EMMC_SDMASA: u32 = 0x0000;                    // SDMA System Address Register
@@ -475,13 +475,13 @@ pub const MULTIPLIERS: [u8; 16] = [
 /*
  * quirks
  */
-pub const SDHCI_QUIRK_32BIT_DMA_ADDR: u32 = (1 << 0);
-pub const SDHCI_QUIRK_REG32_RW: u32 = (1 << 1);
-pub const SDHCI_QUIRK_BROKEN_R1B: u32 = (1 << 2);
-pub const SDHCI_QUIRK_NO_HISPD_BIT: u32 = (1 << 3);
-pub const SDHCI_QUIRK_BROKEN_VOLTAGE: u32 = (1 << 4);
-pub const SDHCI_QUIRK_WAIT_SEND_CMD: u32 = (1 << 6);
-pub const SDHCI_QUIRK_USE_WIDE8: u32 = (1 << 8);
+pub const SDHCI_QUIRK_32BIT_DMA_ADDR: u32 = 1 << 0;
+pub const SDHCI_QUIRK_REG32_RW: u32 = 1 << 1;
+pub const SDHCI_QUIRK_BROKEN_R1B: u32 = 1 << 2;
+pub const SDHCI_QUIRK_NO_HISPD_BIT: u32 = 1 << 3;
+pub const SDHCI_QUIRK_BROKEN_VOLTAGE: u32 = 1 << 4;
+pub const SDHCI_QUIRK_WAIT_SEND_CMD: u32 = 1 << 6;
+pub const SDHCI_QUIRK_USE_WIDE8: u32 = 1 << 8;
 
 /*
  * EXT_CSD fields
@@ -521,30 +521,30 @@ pub const EXT_CSD_SEC_BD_BLK_EN: u32 = 1 << 2;
 pub const EXT_CSD_SEC_GB_CL_EN: u32 = 1 << 4; 
 pub const EXT_CSD_SEC_SANITIZE: u32 = 1 << 6;
 
-pub const MMC_MODE_HS: u32 = (1 << 0);
-pub const MMC_MODE_HS_52MHZ: u32 = (1 << 1);
-pub const MMC_MODE_4BIT: u32 = (1 << 2);
-pub const MMC_MODE_8BIT: u32 = (1 << 3);
-pub const MMC_MODE_SPI: u32 = (1 << 4);
-pub const MMC_MODE_DDR_52MHZ: u32 = (1 << 5);
-pub const MMC_MODE_HS200: u32 = (1 << 6);
-pub const MMC_MODE_HS400: u32 = (1 << 7);
-pub const MMC_MODE_HS400ES: u32 = (1 << 8);
+pub const MMC_MODE_HS: u32 = 1 << 0;
+pub const MMC_MODE_HS_52MHZ: u32 = 1 << 1;
+pub const MMC_MODE_4BIT: u32 = 1 << 2;
+pub const MMC_MODE_8BIT: u32 = 1 << 3;
+pub const MMC_MODE_SPI: u32 = 1 << 4;
+pub const MMC_MODE_DDR_52MHZ: u32 = 1 << 5;
+pub const MMC_MODE_HS200: u32 = 1 << 6;
+pub const MMC_MODE_HS400: u32 = 1 << 7;
+pub const MMC_MODE_HS400ES: u32 = 1 << 8;
 
-pub const EXT_CSD_CARD_TYPE_26: u16 = (1 << 0);	/* Card can run at 26MHz */
-pub const EXT_CSD_CARD_TYPE_52: u16 = (1 << 1);	/* Card can run at 52MHz */
-pub const EXT_CSD_CARD_TYPE_HS: u16 = (EXT_CSD_CARD_TYPE_26 | EXT_CSD_CARD_TYPE_52);
+pub const EXT_CSD_CARD_TYPE_26: u16 = 1 << 0;	/* Card can run at 26MHz */
+pub const EXT_CSD_CARD_TYPE_52: u16 = 1 << 1;	/* Card can run at 52MHz */
+pub const EXT_CSD_CARD_TYPE_HS: u16 = EXT_CSD_CARD_TYPE_26 | EXT_CSD_CARD_TYPE_52;
 pub const EXT_CSD_CARD_TYPE_HS200_1_8V: u16 = 1 << 4;	/* Card can run at 200MHz */
 pub const EXT_CSD_CARD_TYPE_HS200_1_2V: u16 = 1 << 5;	/* Card can run at 200MHz */
-pub const EXT_CSD_CARD_TYPE_HS200: u16 = (EXT_CSD_CARD_TYPE_HS200_1_8V | EXT_CSD_CARD_TYPE_HS200_1_2V);
+pub const EXT_CSD_CARD_TYPE_HS200: u16 = EXT_CSD_CARD_TYPE_HS200_1_8V | EXT_CSD_CARD_TYPE_HS200_1_2V;
 pub const EXT_CSD_CARD_TYPE_HS400_1_8V: u16 = 1 << 6;	/* Card can run at 200MHz DDR, 1.8V */
 pub const EXT_CSD_CARD_TYPE_HS400_1_2V: u16 = 1 << 7;	/* Card can run at 200MHz DDR, 1.2V */
-pub const EXT_CSD_CARD_TYPE_HS400: u16 = (EXT_CSD_CARD_TYPE_HS400_1_8V | EXT_CSD_CARD_TYPE_HS400_1_2V);
+pub const EXT_CSD_CARD_TYPE_HS400: u16 = EXT_CSD_CARD_TYPE_HS400_1_8V | EXT_CSD_CARD_TYPE_HS400_1_2V;
 pub const EXT_CSD_CARD_TYPE_HS400ES: u16 = 1 << 8;	/* Card can run at HS400ES */
 
-pub const EXT_CSD_CARD_TYPE_DDR_1_8V: u8 = (1 << 2);
-pub const EXT_CSD_CARD_TYPE_DDR_1_2V: u8 = (1 << 3);
-pub const EXT_CSD_CARD_TYPE_DDR_52: u8 = (EXT_CSD_CARD_TYPE_DDR_1_8V | EXT_CSD_CARD_TYPE_DDR_1_2V);
+pub const EXT_CSD_CARD_TYPE_DDR_1_8V: u8 = 1 << 2;
+pub const EXT_CSD_CARD_TYPE_DDR_1_2V: u8 = 1 << 3;
+pub const EXT_CSD_CARD_TYPE_DDR_52: u8 = EXT_CSD_CARD_TYPE_DDR_1_8V | EXT_CSD_CARD_TYPE_DDR_1_2V;
 
 pub const MMC_BUS_WIDTH_1BIT: u8 = 1;
 pub const MMC_BUS_WIDTH_4BIT: u8 = 4;

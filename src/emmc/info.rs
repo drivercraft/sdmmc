@@ -116,18 +116,20 @@ impl EMmcHost {
     }
 }
 
-// EMmcCard 代理访问宏 - 为 Host 实现直接访问 Card 参数的方法
+// EMmcCard proxy access macro - enables EMmcHost to directly get/set EMmcCard fields
 macro_rules! impl_emmc_card_proxy {
     ($($field:ident: $type:ty),*) => {
         impl EMmcHost {
             $(
-                // 代理 Getter 方法
+                /// Proxy getter method for accessing a field from the attached EMmcCard.
+                /// Returns `Some(value)` if the card is present, `None` otherwise.
                 pub fn $field(&self) -> Option<$type> {
                     self.card.as_ref().map(|card| card.$field)
                 }
 
-                // 代理 Setter 方法
                 paste::paste! {
+                    /// Proxy setter method for setting a field on the attached EMmcCard.
+                    /// Returns `Ok(())` if successful, or an error string if no card is present.
                     pub fn [<set_ $field>](&mut self, value: $type) -> Result<(), &'static str> {
                         if let Some(card) = self.card.as_mut() {
                             card.$field = value;
@@ -142,13 +144,13 @@ macro_rules! impl_emmc_card_proxy {
 
         impl EMmcCard {
             $(
-                // Getter 方法
+                /// Direct getter method for EMmcCard field
                 pub fn $field(&self) -> $type {
                     self.$field
                 }
 
-                // Setter 方法名：set_field_name
                 paste::paste! {
+                    /// Direct setter method for EMmcCard field
                     pub fn [<set_ $field>](&mut self, value: $type) {
                         self.$field = value;
                     }

@@ -6,7 +6,6 @@ pub mod emmc;
 pub mod err;
 
 use log::warn;
-use core::{arch::asm, sync::atomic::{fence, Ordering}};
 
 pub const BLOCK_SIZE: usize = 512;
 
@@ -24,40 +23,30 @@ pub unsafe fn dump_memory_region(addr: usize, size: usize) {
         let value = unsafe { *start_ptr.add(i) };
         warn!(" 0x{:08x}", value);
     }
+
     warn!("");
 }
 
-// pub trait Kernel {
-//     fn sleep(us: u64);
-// }
+pub trait Kernel {
+    fn sleep(us: u64);
+}
 
-// pub(crate) fn delay_us(us: u64) {
-//     unsafe extern "Rust" {
-//         fn delay_us(us: u64);
-//     }
-
-//     unsafe {
-//         delay_us(us);
-//     }
-// }
-
-// #[macro_export]
-// macro_rules! set_impl {
-//     ($t: ty) => {
-//         #[unsafe(no_mangle)]
-//         unsafe fn delay_us(us: u64) {
-//             <$t as $crate::Kernel>::sleep(us)
-//         }
-//     };
-// }
-
-/// 微秒延时函数
-fn delay_us(us: u32) {
-    let nop_count = 20; // 这个值需要根据特定的 ARM 处理器和时钟频率进行校准
-    
-    for _ in 0..us {
-        for _ in 0..nop_count {
-            unsafe { asm!("nop"); }
-        }
+pub(crate) fn delay_us(us: u64) {
+    unsafe extern "Rust" {
+        fn delay_us(us: u64);
     }
+
+    unsafe {
+        delay_us(us);
+    }
+}
+
+#[macro_export]
+macro_rules! set_impl {
+    ($t: ty) => {
+        #[unsafe(no_mangle)]
+        unsafe fn delay_us(us: u64) {
+            <$t as $crate::Kernel>::sleep(us)
+        }
+    };
 }

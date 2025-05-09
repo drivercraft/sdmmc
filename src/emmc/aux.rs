@@ -32,12 +32,9 @@ pub fn dll_lock_wo_tmout(x: u32) -> bool {
 
 #[inline]
 pub fn lldiv(dividend: u64, divisor: u32) -> u64 {
-    // 创建被除数的副本
-    let mut result = dividend;
-    
+    let mut result = dividend;    
     let _ = do_div(&mut result, divisor);
-    
-    // 返回商
+
     result
 }
 
