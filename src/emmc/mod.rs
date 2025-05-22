@@ -19,7 +19,7 @@ use cmd::*;
 use dma_api::{DVec, Direction};
 use info::CardType;
 use crate::{delay_us, err::*};
-use log::{debug, info};
+use log::{debug, info, trace};
 
 // SD Host Controller structure
 #[derive(Debug)]
@@ -340,7 +340,7 @@ impl EMmcHost {
             // CMD8: Read EXT_CSD
             self.mmc_send_ext_csd(&mut ext_csd)?;
             let mut ext_csd = ext_csd.to_vec();
-            debug!("EXT_CSD: {:?}", ext_csd);
+            trace!("EXT_CSD: {:?}", ext_csd);
 
             // Extract capacity and version
             if ext_csd[EXT_CSD_REV as usize] >= 2 {
@@ -640,7 +640,6 @@ impl EMmcHost {
     }
     
     pub fn mmc_select_hs200(&mut self) -> Result<(), SdError> {
-        // 设置总线宽度
         let ret = self.mmc_select_bus_width()?;
 
         if ret > 0 {

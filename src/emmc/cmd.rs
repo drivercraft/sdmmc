@@ -1,5 +1,5 @@
 use dma_api::DVec;
-use log::{debug, info};
+use log::{debug, info, trace};
 
 use crate::{delay_us, emmc::CardType, err::SdError};
 
@@ -227,7 +227,7 @@ impl EMmcHost {
             command |= EMMC_CMD_DATA;
         }
 
-        info!(
+        trace!(
             "Sending command: opcode={:#x}, arg={:#x}, resp_type={:#x}, command={:#x}",
             cmd.opcode, cmd.arg, cmd.resp_type, command
         );
@@ -271,12 +271,12 @@ impl EMmcHost {
         // Process command completion
         if (status & (EMMC_INT_ERROR as u16 | int_mask)) == int_mask {
             // Command successfully completed
-            info!("Command completed: status={:#b}", status);
+            trace!("Command completed: status={:#b}", status);
             self.write_reg16(EMMC_NORMAL_INT_STAT, int_mask);
         } else {
             // Error occurred
-            debug!("EMMC Normal Int Status: 0x{:x}", self.read_reg16(EMMC_NORMAL_INT_STAT));
-            debug!("EMMC Error Int Status: 0x{:x}", self.read_reg16(EMMC_ERROR_INT_STAT));
+            trace!("EMMC Normal Int Status: 0x{:x}", self.read_reg16(EMMC_NORMAL_INT_STAT));
+            trace!("EMMC Error Int Status: 0x{:x}", self.read_reg16(EMMC_ERROR_INT_STAT));
             
             let err_status = self.read_reg16(EMMC_ERROR_INT_STAT);
             info!("Command error: status={:#b}, err_status={:#b}", status, err_status);
@@ -313,7 +313,7 @@ impl EMmcHost {
 
         // Process data transfer part
         if cmd.data_present {
-            debug!("Data transfer: cmd.data_present={}", cmd.data_present);
+            trace!("Data transfer: cmd.data_present={}", cmd.data_present);
             if let Some(buffer) = &mut data_buffer {
                 #[cfg(feature = "dma")]
                 self.transfer_data_by_dma()?;
@@ -547,7 +547,7 @@ impl EMmcHost {
                 let cmd = EMmcCommand::new(MMC_SEND_STATUS, self.card.as_ref().unwrap().rca << 16, MMC_RSP_R1);
                 self.send_command(&cmd, None)?;
                 let response = self.get_response().as_r1();
-                debug!("cmd_d {:#x}", response);
+                trace!("cmd_d {:#x}", response);
 
                 if response & MMC_STATUS_SWITCH_ERROR != 0 {
                     return Err(SdError::BadMessage);

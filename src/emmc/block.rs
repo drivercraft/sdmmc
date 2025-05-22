@@ -5,6 +5,7 @@ use aux::MMC_VERSION_UNKNOWN;
 use dma_api::DVec;
 use log::debug;
 use log::info;
+use log::trace;
 
 use crate::{delay_us, err::SdError};
 
@@ -332,7 +333,7 @@ impl EMmcHost {
     /// - buffer: Buffer to store the read data
     #[cfg(feature = "pio")]
     pub fn read_blocks(&self, block_id: u32, blocks: u16, buffer: &mut [u8]) -> Result<(), SdError> {
-        info!("pio read_blocks: block_id = {}, blocks = {}", block_id, blocks);
+        trace!("pio read_blocks: block_id = {}, blocks = {}", block_id, blocks);
         // Check if card is initialized
         let card = match &self.card {
             Some(card) => card,
@@ -376,6 +377,8 @@ impl EMmcHost {
     /// - buffer: Buffer containing data to write
     #[cfg(feature = "pio")]
     pub fn write_blocks(&self, block_id: u32, blocks: u16, buffer: &[u8]) -> Result<(), SdError> {
+        use log::trace;
+
         info!("pio write_blocks: block_id = {}, blocks = {}", block_id, blocks);
         // Check if card is initialized
         let card = match &self.card {
@@ -395,7 +398,7 @@ impl EMmcHost {
             block_id * 512  // Standard capacity card: convert to byte address
         };
 
-        debug!("Writing {} blocks starting at address: {:#x}", blocks, card_addr);
+        trace!("Writing {} blocks starting at address: {:#x}", blocks, card_addr);
 
         // Select appropriate command based on number of blocks
         if blocks == 1 {
@@ -444,7 +447,7 @@ impl EMmcHost {
                     }
                 }
 
-                debug!("0x{:08x}: 0x{:08x} 0x{:08x} 0x{:08x} 0x{:08x}", 
+                trace!("0x{:08x}: 0x{:08x} 0x{:08x} 0x{:08x} 0x{:08x}", 
                        buffer.as_ptr() as usize + i,
                        values[0], values[1], values[2], values[3]);
             } else {
@@ -463,7 +466,7 @@ impl EMmcHost {
                     }
                 }
 
-                debug!("0x{:08x}: 0x{:08x} 0x{:08x} 0x{:08x} 0x{:08x}", 
+                trace!("0x{:08x}: 0x{:08x} 0x{:08x} 0x{:08x} 0x{:08x}", 
                        buffer.as_ptr() as usize + i,
                        values[0], values[1], values[2], values[3]);
             }
