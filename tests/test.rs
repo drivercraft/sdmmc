@@ -6,15 +6,15 @@ extern crate alloc;
 
 #[bare_test::tests]
 mod tests {
-    use alloc::vec::Vec;
+    use alloc::{boxed::Box, vec::Vec};
     use bare_test::{globals::{global_val, PlatformInfoKind}, mem::iomap, platform::page_size, println, time::since_boot};
     use dma_api::{DVec, Direction};
     use log::{debug, info, warn};
-    use sdmmc::{set_impl, Kernel};
+    use rk3568_clk::RK3568ClkPriv;
+    use sdmmc::{emmc::clock::{init_global_clk, Clk, ClkError}, set_impl, Kernel};
     use sdmmc::emmc::EMmcHost;
-    use sdmmc::emmc::clock::*;
     use sdmmc::emmc::constant::*;
-
+    
     struct SKernel;
 
     impl Kernel for SKernel {
@@ -67,11 +67,44 @@ mod tests {
         
         let emmc_addr = emmc_addr_ptr.as_ptr() as usize;
         let clk_addr = clk_add_ptr.as_ptr() as usize;
-        // let syscon_addr = syscon_addr_ptr.as_ptr() as usize;
 
         test_emmc(emmc_addr, clk_addr);
 
         info!("test uboot");
+    }
+
+    pub struct ClkUnit(RK3568ClkPriv);
+
+    impl ClkUnit {
+        pub fn new(cru: RK3568ClkPriv) -> Self {
+            ClkUnit(cru)
+        }
+    }
+
+    impl Clk for ClkUnit {
+        fn emmc_get_clk(&self) -> Result<u64, ClkError> {
+            if let Ok(rate) = self.0.emmc_get_bclk() {
+                Ok(rate)
+            } else {
+                Err(ClkError::InvalidClockRate)
+            }
+        }
+
+        fn emmc_set_clk(&self, rate: u64) -> Result<u64, ClkError> {
+            if let Ok(rate) = self.0.emmc_set_clk(rate) {
+                Ok(rate)
+            } else {
+                Err(ClkError::InvalidClockRate)
+            }
+        }
+    }
+
+    fn init_clk(clk_addr: usize) -> Result<(), ClkError> {
+        let cru = ClkUnit::new(unsafe { RK3568ClkPriv::new(clk_addr as *mut _) });
+
+        let static_clk: &'static dyn Clk = Box::leak(Box::new(cru));
+        init_global_clk(static_clk);
+        Ok(())
     }
 
     fn test_emmc(emmc_addr: usize, clock: usize) {

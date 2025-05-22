@@ -470,6 +470,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "rk3568_clk"
+version = "0.1.0"
+source = "git+https://github.com/YanLien/rk3568_clk.git#2120c28f91674bece2d1e1dea349919f929e7d89"
+dependencies = [
+ "log",
+ "spin 0.10.0",
+]
+
+[[package]]
 name = "rust_decimal"
 version = "1.37.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -502,6 +511,7 @@ dependencies = [
  "log",
  "paste",
  "pcie",
+ "rk3568_clk",
  "smccc 0.2.1",
  "spin 0.10.0",
 ]
