@@ -196,7 +196,7 @@ impl EMmcHost {
             block_id * 512  // Standard capacity card: convert to byte address
         };
 
-        debug!("Reading {} blocks starting at address: {:#x}", blocks, card_addr);
+        trace!("Reading {} blocks starting at address: {:#x}", blocks, card_addr);
 
         // Select appropriate command based on number of blocks
         if blocks == 1 {
@@ -251,7 +251,7 @@ impl EMmcHost {
             block_id * 512  // Standard capacity card: convert to byte address
         };
 
-        debug!("Writing {} blocks starting at address: {:#x}", blocks, card_addr);
+        trace!("Writing {} blocks starting at address: {:#x}", blocks, card_addr);
 
         // Select appropriate command based on number of blocks
         if blocks == 1 {
@@ -283,12 +283,12 @@ impl EMmcHost {
         loop {
             // Read the interrupt status register
             let stat = self.read_reg16(EMMC_NORMAL_INT_STAT);
-            debug!("Transfer status: {:#b}", stat);
+            trace!("Transfer status: {:#b}", stat);
     
             // Check for any errors during transfer
             if stat & EMMC_INT_ERROR as u16 != 0 {
                 let err_status = self.read_reg16(EMMC_ERROR_INT_STAT);
-                info!("Data transfer error: status={:#b}, err_status={:#b}", stat, err_status);
+                trace!("Data transfer error: status={:#b}, err_status={:#b}", stat, err_status);
                 
                 // Reset the data circuit to recover from error
                 self.reset_data()?;
@@ -348,7 +348,7 @@ impl EMmcHost {
             block_id * 512  // Standard capacity card: convert to byte address
         };
 
-        debug!("Reading {} blocks starting at address: {:#x}", blocks, card_addr);
+        trace!("Reading {} blocks starting at address: {:#x}", blocks, card_addr);
 
         if blocks == 1 {
             // Single block read operation
@@ -379,7 +379,7 @@ impl EMmcHost {
     pub fn write_blocks(&self, block_id: u32, blocks: u16, buffer: &[u8]) -> Result<(), SdError> {
         use log::trace;
 
-        info!("pio write_blocks: block_id = {}, blocks = {}", block_id, blocks);
+        trace!("pio write_blocks: block_id = {}, blocks = {}", block_id, blocks);
         // Check if card is initialized
         let card = match &self.card {
             Some(card) => card,

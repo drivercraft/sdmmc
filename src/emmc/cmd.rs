@@ -246,7 +246,7 @@ impl EMmcHost {
         let mut status: u16;
         loop {
             status = self.read_reg16(EMMC_NORMAL_INT_STAT);
-            info!("Response Status: {:#b}", status);
+            trace!("Response Status: {:#b}", status);
             
             // Check for errors
             if status & EMMC_INT_ERROR as u16 != 0 {
