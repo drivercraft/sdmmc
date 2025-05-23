@@ -1,24 +1,29 @@
 extern crate alloc;
 
-mod cmd;
 mod block;
+mod cmd;
 mod config;
-mod rockchip;
-mod regs;
 mod info;
+mod regs;
+mod rockchip;
 
-pub mod constant;
 pub mod aux;
 pub mod clock;
+pub mod constant;
 
-use core::fmt::Display;
-use aux::{generic_fls, lldiv, MMC_VERSION_1_2, MMC_VERSION_1_4, MMC_VERSION_2_2, MMC_VERSION_3, MMC_VERSION_4, MMC_VERSION_4_1, MMC_VERSION_4_2, MMC_VERSION_4_3, MMC_VERSION_4_41, MMC_VERSION_4_5, MMC_VERSION_5_0, MMC_VERSION_5_1, MMC_VERSION_UNKNOWN};
+use crate::{delay_us, err::*};
+use aux::{
+    MMC_VERSION_1_2, MMC_VERSION_1_4, MMC_VERSION_2_2, MMC_VERSION_3, MMC_VERSION_4,
+    MMC_VERSION_4_1, MMC_VERSION_4_2, MMC_VERSION_4_3, MMC_VERSION_4_5, MMC_VERSION_4_41,
+    MMC_VERSION_5_0, MMC_VERSION_5_1, MMC_VERSION_UNKNOWN, generic_fls, lldiv,
+};
 use block::EMmcCard;
-use constant::*;
 use cmd::*;
+use constant::*;
+use core::fmt::Display;
+#[cfg(feature = "dma")]
 use dma_api::{DVec, Direction};
 use info::CardType;
-use crate::{delay_us, err::*};
 use log::{debug, info, trace};
 
 // SD Host Controller structure
@@ -37,7 +42,11 @@ pub struct EMmcHost {
 
 impl Display for EMmcHost {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "EMMC Controller {{ base_addr: {:#x}, card: {:?}, caps: {:#x}, clock_base: {} }}", self.base_addr, self.card, self.caps, self.clock_base)
+        write!(
+            f,
+            "EMMC Controller {{ base_addr: {:#x}, card: {:?}, caps: {:#x}, clock_base: {} }}",
+            self.base_addr, self.card, self.caps, self.clock_base
+        )
     }
 }
 
@@ -71,7 +80,7 @@ impl EMmcHost {
     pub fn card(&self) -> Option<&EMmcCard> {
         self.card.as_ref()
     }
-    
+
     // 获取 card 的可变引用
     pub fn card_mut(&mut self) -> Option<&mut EMmcCard> {
         self.card.as_mut()
@@ -126,10 +135,8 @@ impl EMmcHost {
 
         self.host_caps = MMC_MODE_HS | MMC_MODE_HS_52MHZ | MMC_MODE_4BIT;
 
-        if (version & EMMC_SPEC_VER_MASK) >= EMMC_SPEC_300 {
-            if (caps1 & EMMC_CAN_DO_8BIT) == 0 {
-                self.host_caps &= !MMC_MODE_8BIT;
-            }
+        if (version & EMMC_SPEC_VER_MASK) >= EMMC_SPEC_300 && (caps1 & EMMC_CAN_DO_8BIT) == 0 {
+            self.host_caps &= !MMC_MODE_8BIT;
         }
 
         // 暂时写死
@@ -148,17 +155,24 @@ impl EMmcHost {
         } else {
             info!("Unsupported voltage range");
             return Err(SdError::UnsupportedCard);
-        } 
+        }
 
         self.voltages = voltages;
 
-        info!("voltage range: {:#x}, {:#x}", voltages, generic_fls(voltages as u32) - 1);
+        info!(
+            "voltage range: {:#x}, {:#x}",
+            voltages,
+            generic_fls(voltages) - 1
+        );
 
         // Perform full power cycle
-        self.sdhci_set_power(generic_fls(voltages as u32) - 1)?;
+        self.sdhci_set_power(generic_fls(voltages) - 1)?;
 
         // Enable interrupts
-        self.write_reg(EMMC_NORMAL_INT_STAT_EN, EMMC_INT_CMD_MASK | EMMC_INT_DATA_MASK);
+        self.write_reg(
+            EMMC_NORMAL_INT_STAT_EN,
+            EMMC_INT_CMD_MASK | EMMC_INT_DATA_MASK,
+        );
         self.write_reg(EMMC_SIGNAL_ENABLE, 0x0);
 
         // Set initial bus width to 1-bit
@@ -171,7 +185,7 @@ impl EMmcHost {
 
         // Initialize the card
         self.init_card()?;
-        
+
         info!("EMMC initialization completed successfully");
         Ok(())
     }
@@ -198,7 +212,7 @@ impl EMmcHost {
     fn is_card_present(&self) -> bool {
         let state = self.read_reg(EMMC_PRESENT_STATE);
         // debug!("EMMC Present State: {:#b}", state);
-        ((state & EMMC_CARD_INSERTED)) != 0 && ((state & EMMC_CARD_STABLE) != 0)
+        (state & EMMC_CARD_INSERTED) != 0 && ((state & EMMC_CARD_STABLE) != 0)
     }
 
     // Check if card is write protected
@@ -233,7 +247,7 @@ impl EMmcHost {
         self.mmc_set_relative_addr()?;
 
         // CMD9: Read CSD (Card-Specific Data) register
-        let csd = self.mmc_send_csd()?; 
+        let csd = self.mmc_send_csd()?;
 
         // Determine card version from CSD if unknown
         let card = self.card.as_mut().unwrap();
@@ -258,10 +272,7 @@ impl EMmcHost {
             let read_bl_len = (csd[1] >> 16) & 0xf;
             let write_bl_len = (csd[3] >> 22) & 0xf;
             let (csize, cmult) = if high_capacity {
-                (
-                    (csd[1] & 0x3f) << 16 | (csd[2] & 0xffff0000) >> 16,
-                    8,
-                )
+                ((csd[1] & 0x3f) << 16 | (csd[2] & 0xffff0000) >> 16, 8)
             } else {
                 (
                     (csd[1] & 0x3ff) << 2 | (csd[2] & 0xc0000000) >> 30,
@@ -368,17 +379,22 @@ impl EMmcHost {
 
             // Parse partition configuration info
             let part_completed = (ext_csd[EXT_CSD_PARTITION_SETTING as usize] as u32
-                & EXT_CSD_PARTITION_SETTING_COMPLETED) != 0;
-            self.set_part_support(ext_csd[EXT_CSD_PARTITIONING_SUPPORT as usize]).unwrap();
+                & EXT_CSD_PARTITION_SETTING_COMPLETED)
+                != 0;
+            self.set_part_support(ext_csd[EXT_CSD_PARTITIONING_SUPPORT as usize])
+                .unwrap();
 
             if (ext_csd[EXT_CSD_PARTITIONING_SUPPORT as usize] as u32 & PART_SUPPORT != 0)
                 || ext_csd[EXT_CSD_BOOT_MULT as usize] != 0
             {
-                self.set_part_config(ext_csd[EXT_CSD_PART_CONF as usize]).unwrap();
+                self.set_part_config(ext_csd[EXT_CSD_PART_CONF as usize])
+                    .unwrap();
             }
 
             // Save enhanced partition attributes
-            if part_completed && (ext_csd[EXT_CSD_PARTITIONING_SUPPORT as usize] as u32 & ENHNCD_SUPPORT != 0) {
+            if part_completed
+                && (ext_csd[EXT_CSD_PARTITIONING_SUPPORT as usize] as u32 & ENHNCD_SUPPORT != 0)
+            {
                 let part_attr = ext_csd[EXT_CSD_PARTITIONS_ATTRIBUTE as usize];
                 self.set_part_attr(part_attr).unwrap();
             }
@@ -419,7 +435,8 @@ impl EMmcHost {
 
             // Calculate enhanced user data size and start
             if part_completed {
-                let mut enh_user_size = ((ext_csd[EXT_CSD_ENH_SIZE_MULT as usize + 2] as u64) << 16)
+                let mut enh_user_size = ((ext_csd[EXT_CSD_ENH_SIZE_MULT as usize + 2] as u64)
+                    << 16)
                     + ((ext_csd[EXT_CSD_ENH_SIZE_MULT as usize + 1] as u64) << 8)
                     + (ext_csd[EXT_CSD_ENH_SIZE_MULT as usize] as u64);
                 enh_user_size *= ext_csd[EXT_CSD_HC_ERASE_GRP_SIZE as usize] as u64;
@@ -427,7 +444,8 @@ impl EMmcHost {
                 enh_user_size <<= 19;
                 self.set_enh_user_size(enh_user_size).unwrap();
 
-                let mut enh_user_start = ((ext_csd[EXT_CSD_ENH_START_ADDR as usize + 3] as u64) << 24)
+                let mut enh_user_start = ((ext_csd[EXT_CSD_ENH_START_ADDR as usize + 3] as u64)
+                    << 24)
                     + ((ext_csd[EXT_CSD_ENH_START_ADDR as usize + 2] as u64) << 16)
                     + ((ext_csd[EXT_CSD_ENH_START_ADDR as usize + 1] as u64) << 8)
                     + (ext_csd[EXT_CSD_ENH_START_ADDR as usize] as u64);
@@ -459,19 +477,24 @@ impl EMmcHost {
 
             // Calculate erase group size
             if ext_csd[EXT_CSD_ERASE_GROUP_DEF as usize] & 0x01 != 0 {
-                self.set_erase_grp_size((ext_csd[EXT_CSD_HC_ERASE_GRP_SIZE as usize] as u32) * 1024).unwrap();
+                self.set_erase_grp_size(
+                    (ext_csd[EXT_CSD_HC_ERASE_GRP_SIZE as usize] as u32) * 1024,
+                )
+                .unwrap();
 
                 if high_capacity && part_completed {
                     let capacity = (ext_csd[EXT_CSD_SEC_CNT as usize] as u64)
                         | ((ext_csd[EXT_CSD_SEC_CNT as usize + 1] as u64) << 8)
                         | ((ext_csd[EXT_CSD_SEC_CNT as usize + 2] as u64) << 16)
                         | ((ext_csd[EXT_CSD_SEC_CNT as usize + 3] as u64) << 24);
-                    self.set_capacity_user(capacity * (MMC_MAX_BLOCK_LEN as u64)).unwrap();
+                    self.set_capacity_user(capacity * (MMC_MAX_BLOCK_LEN as u64))
+                        .unwrap();
                 }
             } else {
                 let erase_gsz = (csd[2] & 0x00007c00) >> 10;
                 let erase_gmul = (csd[2] & 0x000003e0) >> 5;
-                self.set_erase_grp_size((erase_gsz + 1) * (erase_gmul + 1)).unwrap();
+                self.set_erase_grp_size((erase_gsz + 1) * (erase_gmul + 1))
+                    .unwrap();
             }
 
             // Set high-capacity write-protect group size
@@ -481,8 +504,10 @@ impl EMmcHost {
             self.set_hc_wp_grp_size(hc_wp_grp_size).unwrap();
 
             // Set write reliability and drive strength
-            self.set_wr_rel_set(ext_csd[EXT_CSD_WR_REL_SET as usize]).unwrap();
-            self.set_raw_driver_strength(ext_csd[EXT_CSD_DRIVER_STRENGTH as usize]).unwrap();
+            self.set_wr_rel_set(ext_csd[EXT_CSD_WR_REL_SET as usize])
+                .unwrap();
+            self.set_raw_driver_strength(ext_csd[EXT_CSD_DRIVER_STRENGTH as usize])
+                .unwrap();
         }
 
         // Final initialization steps
@@ -496,29 +521,23 @@ impl EMmcHost {
     fn mmc_set_capacity(&mut self, part_num: u32) -> Result<(), SdError> {
         // part_num 暂时设置为 0
         match part_num {
-            0 => {
-                match self.capacity_user() {
-                    Some(capacity_user) => self.set_capacity(capacity_user).unwrap(),
-                    None => return Err(SdError::InvalidArgument),
-                }
+            0 => match self.capacity_user() {
+                Some(capacity_user) => self.set_capacity(capacity_user).unwrap(),
+                None => return Err(SdError::InvalidArgument),
             },
-            1 | 2 => {
-                match self.capacity_boot() {
-                    Some(capacity_boot) => self.set_capacity(capacity_boot).unwrap(),
-                    None => return Err(SdError::InvalidArgument),
-                }
+            1 | 2 => match self.capacity_boot() {
+                Some(capacity_boot) => self.set_capacity(capacity_boot).unwrap(),
+                None => return Err(SdError::InvalidArgument),
             },
-            3 => {
-                match self.capacity_rpmb() {
-                    Some(capacity_rpmb) => self.set_capacity(capacity_rpmb).unwrap(),
-                    None => return Err(SdError::InvalidArgument),
-                }
+            3 => match self.capacity_rpmb() {
+                Some(capacity_rpmb) => self.set_capacity(capacity_rpmb).unwrap(),
+                None => return Err(SdError::InvalidArgument),
             },
-            4 | 5 | 6 | 7 => {
-                match self.capacity_gp() {
-                    Some(capacity_gp) => self.set_capacity(capacity_gp[(part_num - 4) as usize]).unwrap(),
-                    None => return Err(SdError::InvalidArgument),
-                }
+            4..=7 => match self.capacity_gp() {
+                Some(capacity_gp) => self
+                    .set_capacity(capacity_gp[(part_num - 4) as usize])
+                    .unwrap(),
+                None => return Err(SdError::InvalidArgument),
             },
             _ => return Err(SdError::InvalidArgument),
         }
@@ -539,27 +558,27 @@ impl EMmcHost {
                 let mut ext_csd: [u8; 512] = [0; 512];
             }
         }
-    
+
         // Initialize card capabilities flags
         self.set_card_caps(0).unwrap();
-    
+
         // Get card version (default to 0 if not available)
         let version = self.version().unwrap_or(0);
-    
+
         // Only cards version 4.0 and above support high-speed modes
         if version < MMC_VERSION_4 {
             return Ok(());
         }
-    
+
         // Enable both 4-bit and 8-bit modes on the card
         self.set_card_caps(MMC_MODE_4BIT | MMC_MODE_8BIT).unwrap();
-    
+
         // Read the EXT_CSD register from the card
         self.mmc_send_ext_csd(&mut ext_csd)?;
-    
+
         // Determine supported high-speed modes from EXT_CSD
         let avail_type = self.mmc_select_card_type(&ext_csd);
-    
+
         // Select the appropriate high-speed mode supported by both host and card
         let result = if avail_type & EXT_CSD_CARD_TYPE_HS200 != 0 {
             // HS200 mode
@@ -570,35 +589,40 @@ impl EMmcHost {
         } else {
             Err(SdError::InvalidArgument)
         };
-    
+
         // Apply the result of speed mode selection
         result?;
-    
+
         // Configure the bus speed according to selected type
         self.mmc_set_bus_speed(avail_type as u32);
-    
+
         // If HS200 mode was selected, perform tuning procedure
         if self.mmc_card_hs200() {
             let tuning_result = self.mmc_hs200_tuning();
-    
+
             // Optionally upgrade to HS400 mode if supported and using 8-bit bus
-            if avail_type & EXT_CSD_CARD_TYPE_HS400 != 0 &&
-                self.bus_width().unwrap_or(0) == MMC_BUS_WIDTH_8BIT {
+            if avail_type & EXT_CSD_CARD_TYPE_HS400 != 0
+                && self.bus_width().unwrap_or(0) == MMC_BUS_WIDTH_8BIT
+            {
                 // self.mmc_select_hs400()?; // Currently not executed
                 self.mmc_set_bus_speed(avail_type as u32);
             }
-    
+
             tuning_result
         } else if !self.mmc_card_hs400es() {
             // If not in HS400 Enhanced Strobe mode, try to switch bus width
             let width_result = self.mmc_select_bus_width()?;
-            let err = if width_result > 0 { Ok(()) } else { Err(SdError::BusWidth) };
-    
+            let err = if width_result > 0 {
+                Ok(())
+            } else {
+                Err(SdError::BusWidth)
+            };
+
             // If DDR52 mode is supported, implement selection (currently TODO)
             if err.is_ok() && avail_type & EXT_CSD_CARD_TYPE_DDR_52 as u16 != 0 {
                 todo!("Implement HS-DDR selection");
             }
-    
+
             err
         } else {
             // Already in HS400ES mode, no further action needed
@@ -638,7 +662,7 @@ impl EMmcHost {
         let timing = self.timing().unwrap();
         timing == MMC_TIMING_MMC_HS200
     }
-    
+
     pub fn mmc_select_hs200(&mut self) -> Result<(), SdError> {
         let ret = self.mmc_select_bus_width()?;
 
@@ -647,7 +671,7 @@ impl EMmcHost {
                 EXT_CSD_CMD_SET_NORMAL,
                 EXT_CSD_HS_TIMING,
                 EXT_CSD_TIMING_HS200,
-                false
+                false,
             )?;
 
             self.mmc_set_timing(MMC_TIMING_MMC_HS200);
@@ -657,14 +681,8 @@ impl EMmcHost {
     }
 
     fn mmc_select_bus_width(&mut self) -> Result<i32, SdError> {
-        let ext_csd_bits: [u8; 2] = [
-            EXT_CSD_BUS_WIDTH_8,
-            EXT_CSD_BUS_WIDTH_4,
-        ];
-        let bus_widths: [u8; 2] = [
-            MMC_BUS_WIDTH_8BIT,
-            MMC_BUS_WIDTH_4BIT,
-        ];
+        let ext_csd_bits: [u8; 2] = [EXT_CSD_BUS_WIDTH_8, EXT_CSD_BUS_WIDTH_4];
+        let bus_widths: [u8; 2] = [MMC_BUS_WIDTH_8BIT, MMC_BUS_WIDTH_4BIT];
 
         cfg_if::cfg_if! {
             if #[cfg(feature = "dma")] {
@@ -678,46 +696,51 @@ impl EMmcHost {
         }
 
         // 版本检查和主机能力检查
-        if self.version().unwrap_or(0) < MMC_VERSION_4 || 
-           (self.host_caps & (MMC_MODE_4BIT | MMC_MODE_8BIT)) == 0 {
+        if self.version().unwrap_or(0) < MMC_VERSION_4
+            || (self.host_caps & (MMC_MODE_4BIT | MMC_MODE_8BIT)) == 0
+        {
             return Ok(0);
         }
 
         self.mmc_send_ext_csd(&mut ext_csd)?;
 
-        let mut idx = if (self.host_caps & MMC_MODE_8BIT) != 0 { 0 } else { 1 };
+        let mut idx = if (self.host_caps & MMC_MODE_8BIT) != 0 {
+            0
+        } else {
+            1
+        };
         while idx < bus_widths.len() {
             let switch_result = self.mmc_switch(
                 EXT_CSD_CMD_SET_NORMAL,
-                EXT_CSD_BUS_WIDTH, 
-                ext_csd_bits[idx] as u8,
-                true
+                EXT_CSD_BUS_WIDTH,
+                ext_csd_bits[idx],
+                true,
             );
-            
-            if let Err(_) = switch_result {
+
+            if switch_result.is_err() {
                 idx += 1;
                 continue;
             }
-            
+
             let bus_width = bus_widths[idx];
             self.mmc_set_bus_width(bus_width);
-            
+
             // 再次读取EXT_CSD进行验证
             let test_result = self.mmc_send_ext_csd(&mut test_csd);
-            
-            if let Err(_) = test_result {
+
+            if test_result.is_err() {
                 idx += 1;
                 continue;
             }
-            if (ext_csd[EXT_CSD_PARTITIONING_SUPPORT as usize] ==
-                test_csd[EXT_CSD_PARTITIONING_SUPPORT as usize]) &&
-               (ext_csd[EXT_CSD_HC_WP_GRP_SIZE as usize] ==
-                test_csd[EXT_CSD_HC_WP_GRP_SIZE as usize]) &&
-               (ext_csd[EXT_CSD_REV as usize] == 
-                test_csd[EXT_CSD_REV as usize]) &&
-               (ext_csd[EXT_CSD_HC_ERASE_GRP_SIZE as usize] ==
-                test_csd[EXT_CSD_HC_ERASE_GRP_SIZE as usize]) &&
-               self.compare_sector_count(&ext_csd, &test_csd) {
+            if (ext_csd[EXT_CSD_PARTITIONING_SUPPORT as usize]
+                == test_csd[EXT_CSD_PARTITIONING_SUPPORT as usize])
+                && (ext_csd[EXT_CSD_HC_WP_GRP_SIZE as usize]
+                    == test_csd[EXT_CSD_HC_WP_GRP_SIZE as usize])
+                && (ext_csd[EXT_CSD_REV as usize] == test_csd[EXT_CSD_REV as usize])
+                && (ext_csd[EXT_CSD_HC_ERASE_GRP_SIZE as usize]
+                    == test_csd[EXT_CSD_HC_ERASE_GRP_SIZE as usize])
+                && self.compare_sector_count(&ext_csd, &test_csd)
+            {
                 return Ok(bus_width as i32);
             } else {
                 idx += 1;
@@ -758,11 +781,11 @@ impl EMmcHost {
             // HS400 tuning must be issued in HS200 mode; reject direct HS400 timing
             MMC_TIMING_MMC_HS400 => {
                 return Err(SdError::InvalidArgument);
-            },
+            }
             // HS200 timing: OK to proceed with tuning here
             MMC_TIMING_MMC_HS200 => {
                 // HS400 re-tuning is not expected; leave periodic tuning disabled
-            },
+            }
             // Any other timing mode is invalid for HS200 tuning
             _ => {
                 return Err(SdError::InvalidArgument);
@@ -807,15 +830,14 @@ impl EMmcHost {
     /// Send a single tuning block read command over the SDHCI interface
     fn emmc_send_tuning(&mut self, opcode: u8) -> Result<(), SdError> {
         // Helper to pack DMA boundary and block size fields
-        let make_blksz = |dma: u16, blksz: u16| {
-            ((dma & 0x7) << 12) | (blksz & 0x0FFF)
-        };
+        let make_blksz = |dma: u16, blksz: u16| ((dma & 0x7) << 12) | (blksz & 0x0FFF);
 
         // Determine current bus width (1/4/8 bits)
         let bus_width = self.bus_width().unwrap();
 
         // Choose block size: 128 bytes for HS200 on 8-bit bus, else 64 bytes
-        let block_size = if opcode == MMC_SEND_TUNING_BLOCK_HS200 && bus_width == MMC_BUS_WIDTH_8BIT {
+        let block_size = if opcode == MMC_SEND_TUNING_BLOCK_HS200 && bus_width == MMC_BUS_WIDTH_8BIT
+        {
             128
         } else {
             64
@@ -836,8 +858,10 @@ impl EMmcHost {
     #[allow(unused)]
     fn mmc_card_ddr(&self) -> bool {
         let timing = self.timing().unwrap();
-        (timing == MMC_TIMING_UHS_DDR50) || (timing == MMC_TIMING_MMC_DDR52) ||
-		(timing == MMC_TIMING_MMC_HS400) || (timing == MMC_TIMING_MMC_HS400ES)
+        (timing == MMC_TIMING_UHS_DDR50)
+            || (timing == MMC_TIMING_MMC_DDR52)
+            || (timing == MMC_TIMING_MMC_HS400)
+            || (timing == MMC_TIMING_MMC_HS400ES)
     }
 
     #[cfg(feature = "dma")]
@@ -846,40 +870,39 @@ impl EMmcHost {
         let host_caps = self.host_caps;
         let mut avail_type = 0;
 
-        if (host_caps & MMC_MODE_HS != 0) &&
-           (card_type & EXT_CSD_CARD_TYPE_26 != 0) {
+        if (host_caps & MMC_MODE_HS != 0) && (card_type & EXT_CSD_CARD_TYPE_26 != 0) {
             avail_type |= EXT_CSD_CARD_TYPE_26;
         }
 
-        if (host_caps & MMC_MODE_HS != 0) &&
-           (card_type & EXT_CSD_CARD_TYPE_52 != 0) {
+        if (host_caps & MMC_MODE_HS != 0) && (card_type & EXT_CSD_CARD_TYPE_52 != 0) {
             avail_type |= EXT_CSD_CARD_TYPE_52;
         }
 
-        if (host_caps & MMC_MODE_DDR_52MHZ != 0) &&
-           (card_type & EXT_CSD_CARD_TYPE_DDR_1_8V as u16 != 0) {
+        if (host_caps & MMC_MODE_DDR_52MHZ != 0)
+            && (card_type & EXT_CSD_CARD_TYPE_DDR_1_8V as u16 != 0)
+        {
             avail_type |= EXT_CSD_CARD_TYPE_DDR_1_8V as u16;
         }
 
-        if (host_caps & MMC_MODE_HS200 != 0) &&
-           (card_type & EXT_CSD_CARD_TYPE_HS200_1_8V != 0) {
+        if (host_caps & MMC_MODE_HS200 != 0) && (card_type & EXT_CSD_CARD_TYPE_HS200_1_8V != 0) {
             avail_type |= EXT_CSD_CARD_TYPE_HS200_1_8V;
         }
 
-        if (host_caps & MMC_MODE_HS400 != 0) &&
-           (host_caps & MMC_MODE_8BIT != 0) &&
-           (card_type & EXT_CSD_CARD_TYPE_HS400_1_8V != 0) {
-            avail_type |= EXT_CSD_CARD_TYPE_HS200_1_8V |
-                          EXT_CSD_CARD_TYPE_HS400_1_8V;
+        if (host_caps & MMC_MODE_HS400 != 0)
+            && (host_caps & MMC_MODE_8BIT != 0)
+            && (card_type & EXT_CSD_CARD_TYPE_HS400_1_8V != 0)
+        {
+            avail_type |= EXT_CSD_CARD_TYPE_HS200_1_8V | EXT_CSD_CARD_TYPE_HS400_1_8V;
         }
 
-        if (host_caps & MMC_MODE_HS400ES != 0) &&
-           (host_caps & MMC_MODE_8BIT != 0) &&
-           (ext_csd[EXT_CSD_STROBE_SUPPORT as usize] != 0) &&
-           (avail_type & EXT_CSD_CARD_TYPE_HS400_1_8V != 0) {
-            avail_type |= EXT_CSD_CARD_TYPE_HS200_1_8V |
-                          EXT_CSD_CARD_TYPE_HS400_1_8V |
-                          EXT_CSD_CARD_TYPE_HS400ES;
+        if (host_caps & MMC_MODE_HS400ES != 0)
+            && (host_caps & MMC_MODE_8BIT != 0)
+            && (ext_csd[EXT_CSD_STROBE_SUPPORT as usize] != 0)
+            && (avail_type & EXT_CSD_CARD_TYPE_HS400_1_8V != 0)
+        {
+            avail_type |= EXT_CSD_CARD_TYPE_HS200_1_8V
+                | EXT_CSD_CARD_TYPE_HS400_1_8V
+                | EXT_CSD_CARD_TYPE_HS400ES;
         }
 
         avail_type
@@ -891,40 +914,39 @@ impl EMmcHost {
         let host_caps = self.host_caps;
         let mut avail_type = 0;
 
-        if (host_caps & MMC_MODE_HS != 0) &&
-           (card_type & EXT_CSD_CARD_TYPE_26 != 0) {
+        if (host_caps & MMC_MODE_HS != 0) && (card_type & EXT_CSD_CARD_TYPE_26 != 0) {
             avail_type |= EXT_CSD_CARD_TYPE_26;
         }
 
-        if (host_caps & MMC_MODE_HS != 0) &&
-           (card_type & EXT_CSD_CARD_TYPE_52 != 0) {
+        if (host_caps & MMC_MODE_HS != 0) && (card_type & EXT_CSD_CARD_TYPE_52 != 0) {
             avail_type |= EXT_CSD_CARD_TYPE_52;
         }
 
-        if (host_caps & MMC_MODE_DDR_52MHZ != 0) &&
-           (card_type & EXT_CSD_CARD_TYPE_DDR_1_8V as u16 != 0) {
+        if (host_caps & MMC_MODE_DDR_52MHZ != 0)
+            && (card_type & EXT_CSD_CARD_TYPE_DDR_1_8V as u16 != 0)
+        {
             avail_type |= EXT_CSD_CARD_TYPE_DDR_1_8V as u16;
         }
 
-        if (host_caps & MMC_MODE_HS200 != 0) &&
-           (card_type & EXT_CSD_CARD_TYPE_HS200_1_8V != 0) {
+        if (host_caps & MMC_MODE_HS200 != 0) && (card_type & EXT_CSD_CARD_TYPE_HS200_1_8V != 0) {
             avail_type |= EXT_CSD_CARD_TYPE_HS200_1_8V;
         }
 
-        if (host_caps & MMC_MODE_HS400 != 0) &&
-           (host_caps & MMC_MODE_8BIT != 0) &&
-           (card_type & EXT_CSD_CARD_TYPE_HS400_1_8V != 0) {
-            avail_type |= EXT_CSD_CARD_TYPE_HS200_1_8V |
-                          EXT_CSD_CARD_TYPE_HS400_1_8V;
+        if (host_caps & MMC_MODE_HS400 != 0)
+            && (host_caps & MMC_MODE_8BIT != 0)
+            && (card_type & EXT_CSD_CARD_TYPE_HS400_1_8V != 0)
+        {
+            avail_type |= EXT_CSD_CARD_TYPE_HS200_1_8V | EXT_CSD_CARD_TYPE_HS400_1_8V;
         }
 
-        if (host_caps & MMC_MODE_HS400ES != 0) &&
-           (host_caps & MMC_MODE_8BIT != 0) &&
-           (ext_csd[EXT_CSD_STROBE_SUPPORT as usize] != 0) &&
-           (avail_type & EXT_CSD_CARD_TYPE_HS400_1_8V != 0) {
-            avail_type |= EXT_CSD_CARD_TYPE_HS200_1_8V |
-                          EXT_CSD_CARD_TYPE_HS400_1_8V |
-                          EXT_CSD_CARD_TYPE_HS400ES;
+        if (host_caps & MMC_MODE_HS400ES != 0)
+            && (host_caps & MMC_MODE_8BIT != 0)
+            && (ext_csd[EXT_CSD_STROBE_SUPPORT as usize] != 0)
+            && (avail_type & EXT_CSD_CARD_TYPE_HS400_1_8V != 0)
+        {
+            avail_type |= EXT_CSD_CARD_TYPE_HS200_1_8V
+                | EXT_CSD_CARD_TYPE_HS400_1_8V
+                | EXT_CSD_CARD_TYPE_HS400ES;
         }
 
         avail_type
@@ -935,13 +957,13 @@ impl EMmcHost {
             EXT_CSD_CMD_SET_NORMAL,
             EXT_CSD_HS_TIMING,
             EXT_CSD_TIMING_HS,
-            true
+            true,
         );
 
         if ret.is_ok() {
             self.mmc_set_timing(MMC_TIMING_MMC_HS);
         }
-    
+
         ret
     }
 
@@ -967,12 +989,21 @@ impl EMmcHost {
         self.sdhci_set_ios();
     }
 
-    fn mmc_switch(&self, _set: u8, index: u32, value: u8, send_status: bool) -> Result<(), SdError> {
+    fn mmc_switch(
+        &self,
+        _set: u8,
+        index: u32,
+        value: u8,
+        send_status: bool,
+    ) -> Result<(), SdError> {
         let mut retries = 3;
         let cmd = EMmcCommand::new(
-            MMC_SWITCH, ((MMC_SWITCH_MODE_WRITE_BYTE as u32) << 24) | 
-            ((index as u32) << 16) | ((value as u32) << 8), 
-            MMC_RSP_R1B);
+            MMC_SWITCH,
+            (MMC_SWITCH_MODE_WRITE_BYTE << 24)
+                | (index << 16)
+                | ((value as u32) << 8),
+            MMC_RSP_R1B,
+        );
 
         loop {
             let ret = self.send_command(&cmd, None);
@@ -989,6 +1020,6 @@ impl EMmcHost {
             }
         }
 
-        return Err(SdError::Timeout);
+        Err(SdError::Timeout)
     }
 }

@@ -1,11 +1,14 @@
+#[cfg(feature = "dma")]
 use dma_api::DVec;
 use log::{debug, info, trace};
 
 use crate::{delay_us, emmc::CardType, err::SdError};
 
-use super::{block::DataBuffer, constant::*, EMmcHost};
+use super::{EMmcHost, block::DataBuffer, constant::*};
 
+#[allow(dead_code)]
 const EMMC_DEFAULT_BOUNDARY_ARG: u16 = 7;
+
 const CMD_DEFAULT_TIMEOUT: u32 = 100;
 const CMD_MAX_TIMEOUT: u32 = 500;
 
@@ -60,13 +63,14 @@ impl SdResponse {
         for i in 0..4 {
             response[i] = self.raw[3 - i] << 8;
             if i != 3 {
-                response[i] |= self.raw[3-i-1] >> 24;
+                response[i] |= self.raw[3 - i - 1] >> 24;
             }
         }
-        info!("eMMC response: {:#x} {:#x} {:#x} {:#x}", 
-            response[0], response[1], 
-            response[2], response[3]);
-        
+        info!(
+            "eMMC response: {:#x} {:#x} {:#x} {:#x}",
+            response[0], response[1], response[2], response[3]
+        );
+
         response
     }
 
@@ -85,15 +89,19 @@ impl SdResponse {
 
 impl EMmcHost {
     // Send command
-    pub fn send_command(&self, cmd: &EMmcCommand, mut data_buffer: Option<DataBuffer>) -> Result<(), SdError> {
+    pub fn send_command(
+        &self,
+        cmd: &EMmcCommand,
+        mut data_buffer: Option<DataBuffer>,
+    ) -> Result<(), SdError> {
         let mut cmd_timeout = CMD_DEFAULT_TIMEOUT;
-        
+
         // Check if command or data line is busy
         let mut mask = EMMC_CMD_INHIBIT;
         if cmd.data_present {
             mask |= EMMC_DATA_INHIBIT;
         }
-        
+
         // For STOP_TRANSMISSION command, no need to wait for data inhibit
         if cmd.opcode == MMC_STOP_TRANSMISSION {
             mask &= !EMMC_DATA_INHIBIT;
@@ -104,7 +112,7 @@ impl EMmcHost {
         while (self.read_reg(EMMC_PRESENT_STATE) & mask) != 0 {
             if time >= cmd_timeout {
                 info!("MMC: busy timeout");
-                
+
                 // If timeout can be increased, double the timeout and continue
                 if 2 * cmd_timeout <= CMD_MAX_TIMEOUT {
                     cmd_timeout += cmd_timeout;
@@ -119,13 +127,13 @@ impl EMmcHost {
             time += 1;
             delay_us(1000);
         }
-        
+
         // Clear all interrupt statuses
         self.write_reg16(EMMC_NORMAL_INT_STAT, 0xFFFF);
         self.write_reg16(EMMC_ERROR_INT_STAT, 0xFFFF);
 
         let mut int_mask = EMMC_INT_RESPONSE as u16;
-        
+
         // If data is present and the response type includes the BUSY flag, wait for data end interrupt
         if cmd.data_present && (cmd.resp_type & MMC_RSP_BUSY != 0) {
             int_mask |= EMMC_INT_DATA_END as u16;
@@ -145,7 +153,7 @@ impl EMmcHost {
                 mode |= EMMC_TRNS_READ;
             }
 
-            #[cfg(feature = "dma")] 
+            #[cfg(feature = "dma")]
             {
                 // Configure transfer mode
                 self.write_reg16(EMMC_XFER_MODE, mode);
@@ -156,37 +164,43 @@ impl EMmcHost {
 
                         debug!("Read buffer address: {:#x}", ptr);
                         self.write_reg(EMMC_SDMASA, ptr as u32);
-                    },
+                    }
                     Some(DataBuffer::Write(write_buf)) if !cmd.data_dir_read => {
                         let ptr = write_buf.as_ptr() as usize;
                         let start_addr = ptr as u32;
                         self.write_reg(EMMC_SDMASA, start_addr);
-                    },
+                    }
                     _ => return Err(SdError::InvalidArgument),
                 }
-                
+
                 mode |= EMMC_TRNS_DMA;
 
                 // Set block size and count
-                self.write_reg16(EMMC_BLOCK_SIZE, (((EMMC_DEFAULT_BOUNDARY_ARG & 0x7) << 12) | (cmd.block_size & 0xFFF)).try_into().unwrap());
+                self.write_reg16(
+                    EMMC_BLOCK_SIZE,
+                    (((EMMC_DEFAULT_BOUNDARY_ARG & 0x7) << 12) | (cmd.block_size & 0xFFF))
+                        .try_into()
+                        .unwrap(),
+                );
                 self.write_reg16(EMMC_BLOCK_COUNT, cmd.block_count);
-                self.write_reg16(EMMC_XFER_MODE, mode);                
+                self.write_reg16(EMMC_XFER_MODE, mode);
             }
-            
+
             #[cfg(feature = "pio")]
             {
-                self.write_reg16(EMMC_BLOCK_SIZE, (cmd.block_size & 0xFFF).try_into().unwrap());
+                self.write_reg16(
+                    EMMC_BLOCK_SIZE,
+                    (cmd.block_size & 0xFFF).try_into().unwrap(),
+                );
                 self.write_reg16(EMMC_BLOCK_COUNT, cmd.block_count);
 
                 self.write_reg16(EMMC_XFER_MODE, mode);
                 match data_buffer {
-                    Some(DataBuffer::Read(_)) if cmd.data_dir_read => {
-                    },
-                    Some(DataBuffer::Write(_)) if !cmd.data_dir_read => {
-                    },
+                    Some(DataBuffer::Read(_)) if cmd.data_dir_read => {}
+                    Some(DataBuffer::Write(_)) if !cmd.data_dir_read => {}
                     _ => return Err(SdError::InvalidArgument),
                 }
-            } 
+            }
         } else if cmd.resp_type & MMC_RSP_BUSY != 0 {
             // For commands with BUSY but no data, still set timeout control
             self.write_reg8(EMMC_TIMEOUT_CONTROL, 0xe);
@@ -247,27 +261,27 @@ impl EMmcHost {
         loop {
             status = self.read_reg16(EMMC_NORMAL_INT_STAT);
             trace!("Response Status: {:#b}", status);
-            
+
             // Check for errors
             if status & EMMC_INT_ERROR as u16 != 0 {
                 break;
             }
-            
+
             // Check for response completion
             if (status & int_mask) == int_mask {
                 break;
             }
-            
+
             // Check for timeout
-            if timeout_val <= 0 {
+            if timeout_val == 0 {
                 info!("Timeout for status update!");
                 return Err(SdError::Timeout);
             }
-            
+
             timeout_val -= 1;
             delay_us(100);
         }
-        
+
         // Process command completion
         if (status & (EMMC_INT_ERROR as u16 | int_mask)) == int_mask {
             // Command successfully completed
@@ -275,39 +289,48 @@ impl EMmcHost {
             self.write_reg16(EMMC_NORMAL_INT_STAT, int_mask);
         } else {
             // Error occurred
-            trace!("EMMC Normal Int Status: 0x{:x}", self.read_reg16(EMMC_NORMAL_INT_STAT));
-            trace!("EMMC Error Int Status: 0x{:x}", self.read_reg16(EMMC_ERROR_INT_STAT));
-            
+            trace!(
+                "EMMC Normal Int Status: 0x{:x}",
+                self.read_reg16(EMMC_NORMAL_INT_STAT)
+            );
+            trace!(
+                "EMMC Error Int Status: 0x{:x}",
+                self.read_reg16(EMMC_ERROR_INT_STAT)
+            );
+
             let err_status = self.read_reg16(EMMC_ERROR_INT_STAT);
-            info!("Command error: status={:#b}, err_status={:#b}", status, err_status);
-            
+            info!(
+                "Command error: status={:#b}, err_status={:#b}",
+                status, err_status
+            );
+
             // Reset command and data lines
             self.reset_cmd()?;
             if cmd.data_present {
                 self.reset_data()?;
             }
-            
+
             // Map specific error types
             let err = if err_status & 0x1 != 0 {
-                    SdError::Timeout
-                } else if err_status & 0x2 != 0 {
-                    SdError::Crc
-                } else if err_status & 0x4 != 0 {
-                    SdError::EndBit
-                } else if err_status & 0x8 != 0 {
-                    SdError::Index
-                } else if err_status & 0x10 != 0 {
-                    SdError::DataTimeout
-                } else if err_status & 0x20 != 0 {
-                    SdError::DataCrc
-                } else if err_status & 0x40 != 0 {
-                    SdError::DataEndBit
-                } else if err_status & 0x80 != 0 {
-                    SdError::CurrentLimit
-                } else {
-                    SdError::CommandError
-                };
-            
+                SdError::Timeout
+            } else if err_status & 0x2 != 0 {
+                SdError::Crc
+            } else if err_status & 0x4 != 0 {
+                SdError::EndBit
+            } else if err_status & 0x8 != 0 {
+                SdError::Index
+            } else if err_status & 0x10 != 0 {
+                SdError::DataTimeout
+            } else if err_status & 0x20 != 0 {
+                SdError::DataCrc
+            } else if err_status & 0x40 != 0 {
+                SdError::DataEndBit
+            } else if err_status & 0x80 != 0 {
+                SdError::CurrentLimit
+            } else {
+                SdError::CommandError
+            };
+
             return Err(err);
         }
 
@@ -334,10 +357,9 @@ impl EMmcHost {
 
         self.reset(EMMC_RESET_CMD)?;
         self.reset(EMMC_RESET_DATA)?;
-        
+
         Ok(())
     }
-
 
     // Reset command line
     pub fn reset_cmd(&self) -> Result<(), SdError> {
@@ -385,8 +407,7 @@ impl EMmcHost {
     }
 
     // Send CMD0 to reset the card
-    pub fn mmc_go_idle(&self)  -> Result<(), SdError>{
-
+    pub fn mmc_go_idle(&self) -> Result<(), SdError> {
         let cmd = EMmcCommand::new(MMC_GO_IDLE_STATE, 0, MMC_RSP_NONE);
         self.send_command(&cmd, None)?;
 
@@ -395,28 +416,29 @@ impl EMmcHost {
         info!("eMMC reset complete");
         Ok(())
     }
-    
+
     // Send CMD1 to set OCR and check if card is ready
     pub fn mmc_send_op_cond(&mut self, ocr: u32, mut retry: u32) -> Result<u32, SdError> {
         // First command to get capabilities
-        
+
         let mut cmd = EMmcCommand::new(MMC_SEND_OP_COND, ocr, MMC_RSP_R3);
         self.send_command(&cmd, None)?;
         delay_us(10000);
-        
+
         // Get response and store it
         let mut card_ocr = self.get_response().as_r3();
-        
+
         info!("eMMC first CMD1 response (no args): {:#x}", card_ocr);
-        
+
         // Calculate arg for next commands
         let ocr_hcs = 0x40000000; // High Capacity Support
         let ocr_busy = 0x80000000;
         let ocr_voltage_mask = 0x007FFF80;
         let ocr_access_mode = 0x60000000;
-        
-        let cmd_arg = ocr_hcs | (self.voltages & (card_ocr & ocr_voltage_mask)) | 
-                        (card_ocr & ocr_access_mode);
+
+        let cmd_arg = ocr_hcs
+            | (self.voltages & (card_ocr & ocr_voltage_mask))
+            | (card_ocr & ocr_access_mode);
 
         // info!("eMMC CMD1 arg for retries: {:#x}", cmd_arg);
 
@@ -430,12 +452,12 @@ impl EMmcHost {
 
             info!("CMD1 response raw: {:#x}", self.read_reg(EMMC_RESPONSE));
             info!("eMMC CMD1 response: {:#x}", resp);
-            
+
             // Update card OCR
             {
                 let card = self.card.as_mut().unwrap();
                 card.ocr = resp;
-                
+
                 // Check if card is ready (OCR_BUSY flag set)
                 if (resp & ocr_busy) != 0 {
                     ready = true;
@@ -445,30 +467,31 @@ impl EMmcHost {
                     }
                 }
             }
-            
+
             if !ready {
                 retry -= 1;
                 // Delay between retries
                 delay_us(1000);
             }
         }
-        
+
         info!("eMMC initialization status: {}", ready);
-        
+
         if !ready {
             return Err(SdError::UnsupportedCard);
         }
-        
+
         delay_us(1000);
-        
-        debug!("Clock control before CMD2: 0x{:x}, stable: {}", 
+
+        debug!(
+            "Clock control before CMD2: 0x{:x}, stable: {}",
             self.read_reg16(EMMC_CLOCK_CONTROL),
             self.is_clock_stable()
         );
-        
+
         Ok(card_ocr)
     }
-    
+
     // Send CMD2 to get CID
     pub fn mmc_all_send_cid(&mut self) -> Result<[u32; 4], SdError> {
         let cmd = EMmcCommand::new(MMC_ALL_SEND_CID, 0, MMC_RSP_R2);
@@ -488,7 +511,7 @@ impl EMmcHost {
         let rca = self.card.as_ref().unwrap().rca;
 
         let cmd = EMmcCommand::new(MMC_SET_RELATIVE_ADDR, rca << 16, MMC_RSP_R1);
-        self.send_command(&cmd,None)?;
+        self.send_command(&cmd, None)?;
 
         // info!("cmd3 0x{:x}", self.get_response().as_r1());
 
@@ -499,11 +522,11 @@ impl EMmcHost {
     pub fn mmc_send_csd(&mut self) -> Result<[u32; 4], SdError> {
         // Get the RCA value before borrowing the card
         let rca = self.card.as_ref().unwrap().rca;
-        
+
         let cmd = EMmcCommand::new(MMC_SEND_CSD, rca << 16, MMC_RSP_R2);
         self.send_command(&cmd, None)?;
         let response = self.get_response();
-        
+
         // Now borrow card as mutable to update it
         let card = self.card.as_mut().unwrap();
         card.csd = response.as_r2();
@@ -513,27 +536,33 @@ impl EMmcHost {
 
     #[cfg(feature = "dma")]
     pub fn mmc_send_ext_csd(&mut self, ext_csd: &mut DVec<u8>) -> Result<(), SdError> {
-        let cmd = EMmcCommand::new(MMC_SEND_EXT_CSD, 0, MMC_RSP_R1)
-            .with_data(MMC_MAX_BLOCK_LEN as u16, 1, true);
-        
+        let cmd = EMmcCommand::new(MMC_SEND_EXT_CSD, 0, MMC_RSP_R1).with_data(
+            MMC_MAX_BLOCK_LEN as u16,
+            1,
+            true,
+        );
+
         self.send_command(&cmd, Some(DataBuffer::Read(ext_csd)))?;
 
         // debug!("CMD8: {:#x}",self.get_response().as_r1());
         // debug!("EXT_CSD read successfully, rev: {}", ext_csd[EXT_CSD_REV as usize]);
-        
+
         Ok(())
     }
 
     #[cfg(feature = "pio")]
     pub fn mmc_send_ext_csd(&mut self, ext_csd: &mut [u8; 512]) -> Result<(), SdError> {
-        let cmd = EMmcCommand::new(MMC_SEND_EXT_CSD, 0, MMC_RSP_R1)
-            .with_data(MMC_MAX_BLOCK_LEN as u16, 1, true);
-        
+        let cmd = EMmcCommand::new(MMC_SEND_EXT_CSD, 0, MMC_RSP_R1).with_data(
+            MMC_MAX_BLOCK_LEN as u16,
+            1,
+            true,
+        );
+
         self.send_command(&cmd, Some(DataBuffer::Read(ext_csd)))?;
 
         // debug!("CMD8: {:#x}",self.get_response().as_r1());
         // debug!("EXT_CSD read successfully, rev: {}", ext_csd[EXT_CSD_REV as usize]);
-        
+
         Ok(())
     }
 
@@ -544,7 +573,11 @@ impl EMmcHost {
         // 轮询等待卡忙状态结束
         while busy {
             if send_status {
-                let cmd = EMmcCommand::new(MMC_SEND_STATUS, self.card.as_ref().unwrap().rca << 16, MMC_RSP_R1);
+                let cmd = EMmcCommand::new(
+                    MMC_SEND_STATUS,
+                    self.card.as_ref().unwrap().rca << 16,
+                    MMC_RSP_R1,
+                );
                 self.send_command(&cmd, None)?;
                 let response = self.get_response().as_r1();
                 trace!("cmd_d {:#x}", response);
@@ -559,7 +592,7 @@ impl EMmcHost {
             } else {
                 busy = self.mmc_card_busy();
             }
-            
+
             if timeout == 0 && busy {
                 return Err(SdError::Timeout);
             }
@@ -571,11 +604,9 @@ impl EMmcHost {
         Ok(())
     }
 
-    pub fn mmc_card_busy(&self) -> bool {        
+    pub fn mmc_card_busy(&self) -> bool {
         let present_state = self.read_reg(EMMC_PRESENT_STATE);
         // 检查DATA[0]线是否为0（低电平表示忙）
-        let is_busy = !(present_state & EMMC_DATA_0_LVL != 0);
-        
-        is_busy
+        !(present_state & EMMC_DATA_0_LVL != 0)
     }
 }

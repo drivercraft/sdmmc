@@ -26,13 +26,13 @@ const DWCMSHC_EMMC_DLL_LOCKED: u32 = 1 << 8;
 const DWCMSHC_EMMC_DLL_TIMEOUT: u32 = 1 << 9;
 
 pub fn dll_lock_wo_tmout(x: u32) -> bool {
-    ((x & DWCMSHC_EMMC_DLL_LOCKED) == DWCMSHC_EMMC_DLL_LOCKED) && 
-    ((x & DWCMSHC_EMMC_DLL_TIMEOUT) == 0)
+    ((x & DWCMSHC_EMMC_DLL_LOCKED) == DWCMSHC_EMMC_DLL_LOCKED)
+        && ((x & DWCMSHC_EMMC_DLL_TIMEOUT) == 0)
 }
 
 #[inline]
 pub fn lldiv(dividend: u64, divisor: u32) -> u64 {
-    let mut result = dividend;    
+    let mut result = dividend;
     let _ = do_div(&mut result, divisor);
 
     result
@@ -52,31 +52,31 @@ pub fn generic_fls(x: u32) -> u32 {
     if val == 0 {
         return 0;
     }
-    
+
     if (val & 0xffff0000) == 0 {
         val <<= 16;
         r -= 16;
     }
-    
+
     if (val & 0xff000000) == 0 {
         val <<= 8;
         r -= 8;
     }
-    
+
     if (val & 0xf0000000) == 0 {
         val <<= 4;
         r -= 4;
     }
-    
+
     if (val & 0xc0000000) == 0 {
         val <<= 2;
         r -= 2;
     }
-    
+
     if (val & 0x80000000) == 0 {
         val <<= 1;
         r -= 1;
     }
-    
+
     r
 }

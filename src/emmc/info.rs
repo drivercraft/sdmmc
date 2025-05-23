@@ -1,6 +1,6 @@
-use core::sync::atomic::Ordering;
+use super::{EMmcHost, block::EMmcCard, cmd::EMmcCommand, constant::*};
 use crate::err::SdError;
-use super::{block::EMmcCard, cmd::EMmcCommand, constant::*, EMmcHost};
+use core::sync::atomic::Ordering;
 
 // Card information structure
 #[derive(Debug)]
@@ -60,7 +60,7 @@ impl EMmcHost {
 
         // Extract information from CID
         let cid = card.cid;
-        
+
         // SD card CID format
         let manufacturer_id = (cid[0] >> 24) as u8;
         let application_id = ((cid[0] >> 8) & 0xFFFF) as u16;
@@ -196,12 +196,12 @@ impl EMmcHost {
     pub fn set_card(&mut self, card: Option<EMmcCard>) {
         self.card = card;
     }
-    
+
     // CID 数组代理方法
     pub fn cid(&self) -> Option<[u32; 4]> {
         self.card.as_ref().map(|card| card.cid)
     }
-    
+
     pub fn set_cid(&mut self, value: [u32; 4]) -> Result<(), &'static str> {
         if let Some(card) = self.card.as_mut() {
             card.cid = value;
@@ -210,12 +210,12 @@ impl EMmcHost {
             Err("No card present")
         }
     }
-    
+
     // CSD 数组代理方法
     pub fn csd(&self) -> Option<[u32; 4]> {
         self.card.as_ref().map(|card| card.csd)
     }
-    
+
     pub fn set_csd(&mut self, value: [u32; 4]) -> Result<(), &'static str> {
         if let Some(card) = self.card.as_mut() {
             card.csd = value;
@@ -224,12 +224,12 @@ impl EMmcHost {
             Err("No card present")
         }
     }
-    
+
     // capacity_gp 数组代理方法
     pub fn capacity_gp(&self) -> Option<[u64; 4]> {
         self.card.as_ref().map(|card| card.capacity_gp)
     }
-    
+
     pub fn set_capacity_gp(&mut self, value: [u64; 4]) -> Result<(), &'static str> {
         if let Some(card) = self.card.as_mut() {
             card.capacity_gp = value;
@@ -238,12 +238,14 @@ impl EMmcHost {
             Err("No card present")
         }
     }
-    
+
     // AtomicBool 代理方法
     pub fn initialized(&self) -> Option<bool> {
-        self.card.as_ref().map(|card| card.initialized.load(Ordering::Relaxed))
+        self.card
+            .as_ref()
+            .map(|card| card.initialized.load(Ordering::Relaxed))
     }
-    
+
     pub fn set_initialized(&mut self, value: bool) -> Result<(), &'static str> {
         if let Some(card) = self.card.as_mut() {
             card.initialized.store(value, Ordering::Relaxed);
@@ -252,12 +254,12 @@ impl EMmcHost {
             Err("No card present")
         }
     }
-    
+
     // enh_user 相关字段代理方法
     pub fn enh_user_size(&self) -> Option<u64> {
         self.card.as_ref().map(|card| card.enh_user_size)
     }
-    
+
     pub fn set_enh_user_size(&mut self, value: u64) -> Result<(), &'static str> {
         if let Some(card) = self.card.as_mut() {
             card.enh_user_size = value;
@@ -266,11 +268,11 @@ impl EMmcHost {
             Err("No card present")
         }
     }
-    
+
     pub fn enh_user_start(&self) -> Option<u64> {
         self.card.as_ref().map(|card| card.enh_user_start)
     }
-    
+
     pub fn set_enh_user_start(&mut self, value: u64) -> Result<(), &'static str> {
         if let Some(card) = self.card.as_mut() {
             card.enh_user_start = value;
