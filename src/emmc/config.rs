@@ -7,7 +7,7 @@ pub struct EMmcChipConfig {
     pub hs400_tx_tap: u8,
     pub hs400_cmd_tap: u8,
     pub hs400_strbin_tap: u8,
-    pub ddr50_strbin_delay_num: u8,
+    pub _ddr50_strbin_delay_num: u8,
 }
 
 impl EMmcChipConfig {
@@ -18,7 +18,7 @@ impl EMmcChipConfig {
             hs400_tx_tap: 8,
             hs400_cmd_tap: 8,
             hs400_strbin_tap: 3,
-            ddr50_strbin_delay_num: 16,
+            _ddr50_strbin_delay_num: 16,
         }
     }
 }

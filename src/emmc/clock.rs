@@ -18,10 +18,8 @@ static INIT: Once = Once::new();
 static mut GLOBAL_CLK_INSTANCE: Option<&'static dyn Clk> = None;
 
 pub fn init_global_clk(clk: &'static dyn Clk) {
-    INIT.call_once(|| {
-        unsafe {
-            GLOBAL_CLK_INSTANCE = Some(clk);
-        }
+    INIT.call_once(|| unsafe {
+        GLOBAL_CLK_INSTANCE = Some(clk);
     });
 }
 
