@@ -999,9 +999,7 @@ impl EMmcHost {
         let mut retries = 3;
         let cmd = EMmcCommand::new(
             MMC_SWITCH,
-            (MMC_SWITCH_MODE_WRITE_BYTE << 24)
-                | (index << 16)
-                | ((value as u32) << 8),
+            (MMC_SWITCH_MODE_WRITE_BYTE << 24) | (index << 16) | ((value as u32) << 8),
             MMC_RSP_R1B,
         );
 

@@ -5,8 +5,8 @@ use core::sync::atomic::{AtomicBool, Ordering};
 
 #[cfg(feature = "dma")]
 use {
-    dma_api::DVec,
     crate::delay_us,
+    dma_api::DVec,
     log::{debug, info},
 };
 

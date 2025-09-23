@@ -472,10 +472,13 @@ dependencies = [
 [[package]]
 name = "rk3568_clk"
 version = "0.1.0"
-source = "git+https://github.com/YanLien/rk3568_clk.git#2120c28f91674bece2d1e1dea349919f929e7d89"
+source = "git+https://github.com/drivercraft/rk3568-clk.git#2b63818f9f9f576d99988fafa70de41112524e00"
 dependencies = [
+ "aarch64-cpu",
+ "bare-test-macros",
+ "fdt-parser",
+ "kspin",
  "log",
- "spin 0.10.0",
 ]
 
 [[package]]

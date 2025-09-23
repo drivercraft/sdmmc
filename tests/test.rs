@@ -13,16 +13,24 @@ mod tests {
         println,
         time::since_boot,
     };
-    use dma_api::{DVec, Direction};
     use log::{info, warn};
-    use rk3568_clk::RK3568ClkPriv;
+    use rk3568_clk::{
+        CRU,
+        cru_clksel_con28_bits::{
+            CRU_CLKSEL_CCLK_EMMC_CPL_DIV_50M, CRU_CLKSEL_CCLK_EMMC_CPL_DIV_100M,
+            CRU_CLKSEL_CCLK_EMMC_GPL_DIV_150M, CRU_CLKSEL_CCLK_EMMC_GPL_DIV_200M,
+            CRU_CLKSEL_CCLK_EMMC_SOC0_375K, CRU_CLKSEL_CCLK_EMMC_XIN_SOC0_MUX,
+        },
+    };
     use sdmmc::emmc::EMmcHost;
-    use sdmmc::emmc::constant::*;
     use sdmmc::{
         Kernel,
         emmc::clock::{Clk, ClkError, init_global_clk},
         set_impl,
     };
+
+    const MHZ: u32 = 1_000_000;
+    const KHZ: u32 = 1_000;
 
     struct SKernel;
 
@@ -100,37 +108,44 @@ mod tests {
         info!("test uboot");
     }
 
-    pub struct ClkUnit(RK3568ClkPriv);
+    pub struct ClkUnit(CRU);
 
     impl ClkUnit {
-        pub fn new(cru: RK3568ClkPriv) -> Self {
+        pub fn new(cru: CRU) -> Self {
             ClkUnit(cru)
         }
     }
 
     impl Clk for ClkUnit {
         fn emmc_get_clk(&self) -> Result<u64, ClkError> {
-            if let Ok(rate) = self.0.emmc_get_bclk() {
-                Ok(rate)
-            } else {
-                Err(ClkError::InvalidClockRate)
-            }
+            let rate = self.0.cru_clksel_get_cclk_emmc();
+            info!("Current EMMC clock rate: {} Hz", rate);
+            Ok(rate as u64)
         }
 
         fn emmc_set_clk(&self, rate: u64) -> Result<u64, ClkError> {
-            if let Ok(rate) = self.0.emmc_set_clk(rate) {
-                Ok(rate)
-            } else {
-                Err(ClkError::InvalidClockRate)
-            }
+            info!("Setting eMMC clock to {} Hz", rate);
+            let src_clk = match rate as u32 {
+                r if r == 24 * MHZ => CRU_CLKSEL_CCLK_EMMC_XIN_SOC0_MUX,
+                r if r == 52 * MHZ || r == 50 * MHZ => CRU_CLKSEL_CCLK_EMMC_CPL_DIV_50M,
+                r if r == 100 * MHZ => CRU_CLKSEL_CCLK_EMMC_CPL_DIV_100M,
+                r if r == 150 * MHZ => CRU_CLKSEL_CCLK_EMMC_GPL_DIV_150M,
+                r if r == 200 * MHZ => CRU_CLKSEL_CCLK_EMMC_GPL_DIV_200M,
+                r if r == 400 * KHZ || r == 375 * KHZ => CRU_CLKSEL_CCLK_EMMC_SOC0_375K,
+                _ => panic!("Unsupported eMMC clock rate: {} Hz", rate),
+            };
+            self.0.cru_clksel_set_cclk_emmc(src_clk);
+            Ok(rate as u64)
         }
     }
 
     fn init_clk(clk_addr: usize) -> Result<(), ClkError> {
-        let cru = ClkUnit::new(unsafe { RK3568ClkPriv::new(clk_addr as *mut _) });
+        let cru = ClkUnit::new(CRU::new(clk_addr as *mut _));
 
         let static_clk: &'static dyn Clk = Box::leak(Box::new(cru));
+
         init_global_clk(static_clk);
+
         Ok(())
     }
 
