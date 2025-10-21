@@ -24,9 +24,9 @@ pio = []
 
 [dev-dependencies]
 pcie = "0.2"
-bare-test = "0.4.1"
+bare-test = "0.7"
 byte-unit = { version = "5.1.6", default-features = false, features = ["byte"] }
-rk3568_clk = { git = "https://github.com/YanLien/rk3568_clk.git" }
+rk3588-clk = { git = "https://github.com/drivercraft/rk3588-clk.git" }
 
 [build-dependencies]
 bare-test-macros = "0.2"
