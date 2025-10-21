@@ -9,19 +9,12 @@ mod tests {
     use alloc::{boxed::Box, vec::Vec};
     use bare_test::{
         globals::{PlatformInfoKind, global_val},
-        mem::iomap,
+        mem::{iomap, page_size},
         println,
         time::since_boot,
     };
     use log::{info, warn};
-    use rk3568_clk::{
-        CRU,
-        cru_clksel_con28_bits::{
-            CRU_CLKSEL_CCLK_EMMC_CPL_DIV_50M, CRU_CLKSEL_CCLK_EMMC_CPL_DIV_100M,
-            CRU_CLKSEL_CCLK_EMMC_GPL_DIV_150M, CRU_CLKSEL_CCLK_EMMC_GPL_DIV_200M,
-            CRU_CLKSEL_CCLK_EMMC_SOC0_375K, CRU_CLKSEL_CCLK_EMMC_XIN_SOC0_MUX,
-        },
-    };
+    use rk3588_clk::{constant::*, Rk3588Cru};
     use sdmmc::emmc::EMmcHost;
     use sdmmc::{
         Kernel,
@@ -29,8 +22,7 @@ mod tests {
         set_impl,
     };
 
-    const MHZ: u32 = 1_000_000;
-    const KHZ: u32 = 1_000;
+    use core::ptr::NonNull;
 
     struct SKernel;
 
@@ -49,103 +41,56 @@ mod tests {
 
     #[test]
     fn test_platform() {
-        let PlatformInfoKind::DeviceTree(fdt) = &global_val().platform_info;
-        let fdt_parser = fdt.get();
-
-        // Detect platform type by searching for compatible strings
-        if fdt_parser
-            .find_compatible(&["rockchip,rk3568-dwcmshc"])
-            .next()
-            .is_some()
-        {
-            // Rockchip platform detected, run uboot test
-            info!("Rockchip platform detected, running uboot test");
-            test_uboot(&fdt_parser);
-        } else {
-            // Unknown platform, output debug information
-            println!("Unknown platform, no compatible devices found");
-        }
-    }
-
-    fn test_uboot(fdt: &fdt_parser::Fdt) {
-        let emmc = fdt
-            .find_compatible(&["rockchip,dwcmshc-sdhci"])
-            .next()
-            .unwrap();
-        let clock = fdt
-            .find_compatible(&["rockchip,rk3568-cru"])
-            .next()
-            .unwrap();
-        // let syscon = fdt.find_compatible(&["rockchip,rk3568-grf"]).next().unwrap();
-
-        info!("EMMC: {} Clock: {}", emmc.name, clock.name);
-
-        let emmc_reg = emmc.reg().unwrap().next().unwrap();
-        let clk_reg = clock.reg().unwrap().next().unwrap();
-        // let syscon_reg = syscon.reg().unwrap().next().unwrap();
-
-        println!(
-            "EMMC reg {:#x}, {:#x}",
-            emmc_reg.address,
-            emmc_reg.size.unwrap()
-        );
-        println!(
-            "Clock reg {:#x}, {:#x}",
-            clk_reg.address,
-            clk_reg.size.unwrap()
-        );
-        // println!("Syscon reg {:#x}, {:#x}", syscon_reg.address, syscon_reg.size.unwrap());
-
-        let emmc_addr_ptr = iomap((emmc_reg.address as usize).into(), emmc_reg.size.unwrap());
-        let clk_add_ptr = iomap((clk_reg.address as usize).into(), clk_reg.size.unwrap());
-        // let syscon_addr_ptr = iomap((syscon_reg.address as usize).into(), syscon_reg.size.unwrap());
+        let emmc_addr_ptr = get_device_addr("rockchip,dwcmshc-sdhci");
+        let clk_add_ptr = get_device_addr("rockchip,rk3588-cru");
+        
+        info!("emmc ptr: {:p}", emmc_addr_ptr);
+        info!("clk ptr: {:p}", clk_add_ptr);
 
         let emmc_addr = emmc_addr_ptr.as_ptr() as usize;
         let clk_addr = clk_add_ptr.as_ptr() as usize;
+
+        info!("emmc addr: {:#x}", emmc_addr);
+        info!("clk addr: {:#x}", clk_addr);
 
         test_emmc(emmc_addr, clk_addr);
 
         info!("test uboot");
     }
 
-    pub struct ClkUnit(CRU);
+    pub struct ClkUnit(Rk3588Cru);
 
     impl ClkUnit {
-        pub fn new(cru: CRU) -> Self {
+        pub fn new(cru: Rk3588Cru) -> Self {
             ClkUnit(cru)
         }
     }
 
     impl Clk for ClkUnit {
         fn emmc_get_clk(&self) -> Result<u64, ClkError> {
-            let rate = self.0.cru_clksel_get_cclk_emmc();
-            info!("Current EMMC clock rate: {} Hz", rate);
-            Ok(rate as u64)
+            if let Ok(rate) = self.0.mmc_get_clk(CCLK_EMMC) {
+                Ok(rate as u64)
+            } else {
+                Err(ClkError::InvalidClockRate)
+            }
         }
 
         fn emmc_set_clk(&self, rate: u64) -> Result<u64, ClkError> {
-            info!("Setting eMMC clock to {} Hz", rate);
-            let src_clk = match rate as u32 {
-                r if r == 24 * MHZ => CRU_CLKSEL_CCLK_EMMC_XIN_SOC0_MUX,
-                r if r == 52 * MHZ || r == 50 * MHZ => CRU_CLKSEL_CCLK_EMMC_CPL_DIV_50M,
-                r if r == 100 * MHZ => CRU_CLKSEL_CCLK_EMMC_CPL_DIV_100M,
-                r if r == 150 * MHZ => CRU_CLKSEL_CCLK_EMMC_GPL_DIV_150M,
-                r if r == 200 * MHZ => CRU_CLKSEL_CCLK_EMMC_GPL_DIV_200M,
-                r if r == 400 * KHZ || r == 375 * KHZ => CRU_CLKSEL_CCLK_EMMC_SOC0_375K,
-                _ => panic!("Unsupported eMMC clock rate: {} Hz", rate),
-            };
-            self.0.cru_clksel_set_cclk_emmc(src_clk);
-            Ok(rate as u64)
+            if let Ok(rate) = self.0.mmc_set_clk(CCLK_EMMC, rate as usize) {
+                Ok(rate as u64)
+            } else {
+                Err(ClkError::InvalidClockRate)
+            }
         }
     }
 
     fn init_clk(clk_addr: usize) -> Result<(), ClkError> {
-        let cru = ClkUnit::new(CRU::new(clk_addr as *mut _));
+        let cru = ClkUnit::new(Rk3588Cru::new(
+            core::ptr::NonNull::new(clk_addr as *mut u8).unwrap(),
+        ));
 
         let static_clk: &'static dyn Clk = Box::leak(Box::new(cru));
-
         init_global_clk(static_clk);
-
         Ok(())
     }
 
@@ -174,14 +119,7 @@ mod tests {
 
                 // Test reading the first block
                 println!("Attempting to read first block...");
-
-                cfg_if::cfg_if! {
-                    if #[cfg(feature = "dma")] {
-                        let mut buffer: DVec<u8> = DVec::zeros(MMC_MAX_BLOCK_LEN as usize, 0x1000, Direction::FromDevice).unwrap();
-                    } else if #[cfg(feature = "pio")] {
-                        let mut buffer: [u8; 512] = [0; 512];
-                    }
-                }
+                let mut buffer: [u8; 512] = [0; 512];
 
                 match emmc.read_blocks(5034498, 1, &mut buffer) {
                     Ok(_) => {
@@ -198,21 +136,10 @@ mod tests {
                 println!("Testing write and read back...");
                 let test_block_id = 0x3; // Use a safe block address for testing
 
-                cfg_if::cfg_if! {
-                    if #[cfg(feature = "dma")] {
-                        // Prepare test pattern data
-                        let mut write_buffer = DVec::zeros(512, 0x1000, Direction::ToDevice).unwrap();
-                        for i in 0..512 {
-                            // write_buffer.set(i, (i % 256) as u8);
-                            write_buffer.set(i, 0 as u8); // Fill with test pattern data
-                        }
-                    } else if #[cfg(feature = "pio")] {
-                        let mut write_buffer: [u8; 512] = [0; 512];
-                        for i in 0..512 {
-                            // write_buffer[i] = (i % 256) as u8; // Fill with test pattern data
-                            write_buffer[i] = 0 as u8;
-                        }
-                    }
+                let mut write_buffer: [u8; 512] = [0; 512];
+                for i in 0..512 {
+                    // write_buffer[i] = (i % 256) as u8; // Fill with test pattern data
+                    write_buffer[i] = 0 as u8;
                 }
 
                 // Write data
@@ -221,13 +148,7 @@ mod tests {
                         println!("Successfully wrote to block {}!", test_block_id);
 
                         // Read back data
-                        cfg_if::cfg_if! {
-                            if #[cfg(feature = "dma")] {
-                                let mut read_buffer: DVec<u8> = DVec::zeros(MMC_MAX_BLOCK_LEN as usize, 0x1000, Direction::FromDevice).unwrap();
-                            } else if #[cfg(feature = "pio")] {
-                                let mut read_buffer: [u8; 512] = [0; 512];
-                            }
-                        }
+                        let mut read_buffer: [u8; 512] = [0; 512];
 
                         match emmc.read_blocks(test_block_id, 1, &mut read_buffer) {
                             Ok(_) => {
@@ -275,14 +196,9 @@ mod tests {
                 println!("Testing multi-block read...");
                 let multi_block_addr = 200;
                 let block_count = 4; // Read 4 blocks
-                cfg_if::cfg_if! {
-                    if #[cfg(feature = "dma")] {
-                        let mut multi_buffer: DVec<u8> = DVec::zeros(MMC_MAX_BLOCK_LEN as usize * block_count as usize, 0x1000, Direction::FromDevice).unwrap();
-                    } else if #[cfg(feature = "pio")] {
-                        // Using a fixed size of 2048 (which is 512 * 4) instead of computing it at runtime
-                        let mut multi_buffer: [u8; 2048] = [0; 2048];
-                    }
-                }
+
+                // Using a fixed size of 2048 (which is 512 * 4) instead of computing it at runtime
+                let mut multi_buffer: [u8; 2048] = [0; 2048];
 
                 match emmc.read_blocks(multi_block_addr, block_count, &mut multi_buffer) {
                     Ok(_) => {
@@ -312,5 +228,27 @@ mod tests {
 
         // Test complete
         println!("SD card test complete");
+    }
+
+    fn get_device_addr(dtc_str: &str) -> NonNull<u8> {
+        let PlatformInfoKind::DeviceTree(fdt) = &global_val().platform_info;
+        let fdt = fdt.get();
+
+        let binding = [dtc_str];
+        let node = fdt
+            .find_compatible(&binding)
+            .next()
+            .expect("Failed to find syscon node");
+
+        info!("Found node: {}", node.name());
+
+        let regs = node.reg().unwrap().collect::<Vec<_>>();
+        let start = regs[0].address as usize;
+        let end = start + regs[0].size.unwrap_or(0);
+        info!("Syscon address range: 0x{:x} - 0x{:x}", start, end);
+        let start = start & !(page_size() - 1);
+        let end = (end + page_size() - 1) & !(page_size() - 1);
+        info!("Aligned Syscon address range: 0x{:x} - 0x{:x}", start, end);
+        iomap(start.into(), end - start)
     }
 }

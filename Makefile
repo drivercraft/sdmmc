@@ -45,7 +45,7 @@ test:
 
 uboot: 
 	@echo "Running tests" 
-	@cargo test --release --test test -- --show-output --uboot
+	@cargo test --test test -- --show-output --uboot
 
 clean:
 	@echo "Cleaning up"
